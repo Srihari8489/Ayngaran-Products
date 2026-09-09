@@ -1,0 +1,634 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// STAFF & RBAC (Role-Based Access Control)
+// -------------------------------------------------------------
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  name        String           @unique
+  description String?
+  deletedAt   DateTime?        @map("deleted_at")
+  deletedBy   Int?             @map("deleted_by")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  staff       Staff[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id        Int              @id @default(autoincrement())
+  code      String           @unique
+  name      String
+  module    String
+  deletedAt DateTime?        @map("deleted_at")
+  deletedBy Int?             @map("deleted_by")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  roles     RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           Int        @id @default(autoincrement())
+  roleId       Int        @map("role_id")
+  permissionId Int        @map("permission_id")
+  deletedAt    DateTime?  @map("deleted_at")
+  deletedBy    Int?       @map("deleted_by")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Staff {
+  id           Int                    @id @default(autoincrement())
+  staffCode    String                 @unique @map("staff_code")
+  name         String
+  email        String                 @unique
+  phone        String?
+  passwordHash String                 @map("password_hash")
+  roleId       Int                    @map("role_id")
+  isActive     Boolean                @default(true) @map("is_active")
+  deletedAt    DateTime?              @map("deleted_at")
+  deletedBy    Int?                   @map("deleted_by")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+
+  role         Role                   @relation(fields: [roleId], references: [id])
+  auditLogs    AuditLog[]
+  transactions InventoryTransaction[]
+
+  @@map("staff")
+}
+
+// -------------------------------------------------------------
+// CUSTOMERS & AUTHENTICATION
+// -------------------------------------------------------------
+
+model User {
+  id        Int           @id @default(autoincrement())
+  userCode  String        @unique @map("user_code")
+  name      String?
+  email     String?       @unique
+  phone     String?       @unique
+  isActive  Boolean       @default(true) @map("is_active")
+  deletedAt DateTime?     @map("deleted_at")
+  deletedBy Int?          @map("deleted_by")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  addresses UserAddress[]
+  cart      Cart?
+  orders    Order[]
+  reviews   Review[]
+
+  @@map("users")
+}
+
+model UserAddress {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @map("user_id")
+  recipientName String    @map("recipient_name")
+  phone         String
+  addressLine1  String    @map("address_line1")
+  addressLine2  String?   @map("address_line2")
+  city          String
+  state         String
+  pincode       String
+  country       String    @default("India")
+  isDefault     Boolean   @default(false) @map("is_default")
+  deletedAt     DateTime? @map("deleted_at")
+  deletedBy     Int?      @map("deleted_by")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user          User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([state, city])
+  @@map("user_addresses")
+}
+
+// Immutable OTP ledger
+model OtpRequest {
+  id         Int      @id @default(autoincrement())
+  identifier String
+  otpHash    String   @map("otp_hash")
+  expiresAt  DateTime @map("expires_at")
+  attempts   Int      @default(0)
+  isVerified Boolean  @default(false) @map("is_verified")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([identifier, expiresAt])
+  @@map("otp_requests")
+}
+
+// -------------------------------------------------------------
+// CATEGORY HIERARCHY & DYNAMIC ATTRIBUTE SYSTEM
+// -------------------------------------------------------------
+
+model Category {
+  id                 Int                 @id @default(autoincrement())
+  categoryCode       String              @unique @map("category_code")
+  name               String
+  slug               String              @unique
+  description        String?             @db.Text
+  image              String?
+  parentId           Int?                @map("parent_id")
+  isActive           Boolean             @default(true) @map("is_active")
+  sortOrder          Int                 @default(0) @map("sort_order")
+  deletedAt          DateTime?           @map("deleted_at")
+  deletedBy          Int?                @map("deleted_by")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  parent             Category?           @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children           Category[]          @relation("CategoryHierarchy")
+  categoryAttributes CategoryAttribute[]
+  products           Product[]
+
+  @@index([parentId])
+  @@map("categories")
+}
+
+model Attribute {
+  id                     Int                     @id @default(autoincrement())
+  name                   String
+  slug                   String                  @unique
+  dataType               String                  @map("data_type") // text, number, boolean, single_select, multi_select, range
+  unit                   String?
+  isActive               Boolean                 @default(true) @map("is_active")
+  deletedAt              DateTime?               @map("deleted_at")
+  deletedBy              Int?                    @map("deleted_by")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+
+  values                 AttributeValue[]
+  categoryAttributes     CategoryAttribute[]
+  productAttributeValues ProductAttributeValue[]
+  variantAttributeValues VariantAttributeValue[]
+
+  @@map("attributes")
+}
+
+model AttributeValue {
+  id                     Int                     @id @default(autoincrement())
+  attributeId            Int                     @map("attribute_id")
+  value                  String
+  displayName            String                  @map("display_name")
+  sortOrder              Int                     @default(0) @map("sort_order")
+  isActive               Boolean                 @default(true) @map("is_active")
+  deletedAt              DateTime?               @map("deleted_at")
+  deletedBy              Int?                    @map("deleted_by")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+
+  attribute              Attribute               @relation(fields: [attributeId], references: [id])
+  productAttributeValues ProductAttributeValue[]
+  variantAttributeValues VariantAttributeValue[]
+
+  @@index([attributeId])
+  @@map("attribute_values")
+}
+
+model CategoryAttribute {
+  id           Int       @id @default(autoincrement())
+  categoryId   Int       @map("category_id")
+  attributeId  Int       @map("attribute_id")
+  isRequired   Boolean   @default(false) @map("is_required")
+  isFilterable Boolean   @default(true) @map("is_filterable")
+  isVariant    Boolean   @default(false) @map("is_variant")
+  sortOrder    Int       @default(0) @map("sort_order")
+  deletedAt    DateTime? @map("deleted_at")
+  deletedBy    Int?      @map("deleted_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  category     Category  @relation(fields: [categoryId], references: [id])
+  attribute    Attribute @relation(fields: [attributeId], references: [id])
+
+  @@unique([categoryId, attributeId])
+  @@map("category_attributes")
+}
+
+// -------------------------------------------------------------
+// BRANDS & PRODUCTS
+// -------------------------------------------------------------
+
+model Brand {
+  id          Int       @id @default(autoincrement())
+  brandCode   String    @unique @map("brand_code")
+  name        String
+  slug        String    @unique
+  description String?   @db.Text
+  logo        String?
+  isActive    Boolean   @default(true) @map("is_active")
+  deletedAt   DateTime? @map("deleted_at")
+  deletedBy   Int?      @map("deleted_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  products    Product[]
+
+  @@map("brands")
+}
+
+model Product {
+  id                    Int                     @id @default(autoincrement())
+  productCode           String                  @unique @map("product_code")
+  name                  String
+  slug                  String                  @unique
+  description           String?                 @db.Text
+  categoryId            Int                     @map("category_id")
+  brandId               Int                     @map("brand_id")
+  basePrice             Decimal                 @db.Decimal(10, 2) @map("base_price")
+  status                String                  @default("ACTIVE") // DRAFT, ACTIVE, INACTIVE, ARCHIVED
+  minStockAlert         Int                     @default(5) @map("min_stock_alert")
+  deletedAt             DateTime?               @map("deleted_at")
+  deletedBy             Int?                    @map("deleted_by")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  category              Category                @relation(fields: [categoryId], references: [id])
+  brand                 Brand                   @relation(fields: [brandId], references: [id])
+  images                ProductImage[]
+  attributeValues       ProductAttributeValue[]
+  variants              ProductVariant[]
+  reviews               Review[]
+  cartItems             CartItem[]
+  orderItems            OrderItem[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
+  @@map("products")
+}
+
+model ProductImage {
+  id        Int       @id @default(autoincrement())
+  productId Int       @map("product_id")
+  url       String
+  altText   String?   @map("alt_text")
+  isPrimary Boolean   @default(false) @map("is_primary")
+  sortOrder Int       @default(0) @map("sort_order")
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy Int?      @map("deleted_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  product   Product   @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model ProductAttributeValue {
+  id               Int             @id @default(autoincrement())
+  productId        Int             @map("product_id")
+  attributeId      Int             @map("attribute_id")
+  attributeValueId Int?            @map("attribute_value_id")
+  valueText        String?         @db.Text @map("value_text")
+  valueNumber      Decimal?        @db.Decimal(10, 2) @map("value_number")
+  valueBoolean     Boolean?        @map("value_boolean")
+  deletedAt        DateTime?       @map("deleted_at")
+  deletedBy        Int?            @map("deleted_by")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  product          Product         @relation(fields: [productId], references: [id])
+  attribute        Attribute       @relation(fields: [attributeId], references: [id])
+  attributeValue   AttributeValue? @relation(fields: [attributeValueId], references: [id])
+
+  @@index([productId])
+  @@index([attributeId])
+  @@index([attributeValueId])
+  @@map("product_attribute_values")
+}
+
+model ProductVariant {
+  id                    Int                     @id @default(autoincrement())
+  productId             Int                     @map("product_id")
+  sku                   String                  @unique
+  price                 Decimal                 @db.Decimal(10, 2)
+  stockQuantity         Int                     @default(0) @map("stock_quantity")
+  barcode               String?
+  weight                Decimal?                @db.Decimal(8, 2)
+  status                String                  @default("ACTIVE")
+  deletedAt             DateTime?               @map("deleted_at")
+  deletedBy             Int?                    @map("deleted_by")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  product               Product                 @relation(fields: [productId], references: [id])
+  variantValues         VariantAttributeValue[]
+  cartItems             CartItem[]
+  orderItems            OrderItem[]
+  inventoryTransactions InventoryTransaction[]
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model VariantAttributeValue {
+  id               Int            @id @default(autoincrement())
+  variantId        Int            @map("variant_id")
+  attributeId      Int            @map("attribute_id")
+  attributeValueId Int            @map("attribute_value_id")
+
+  variant          ProductVariant @relation(fields: [variantId], references: [id])
+  attribute        Attribute      @relation(fields: [attributeId], references: [id])
+  attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id])
+
+  @@unique([variantId, attributeId])
+  @@map("variant_attribute_values")
+}
+
+// -------------------------------------------------------------
+// INVENTORY & STOCK LEDGER (Append-Only / Immutable)
+// -------------------------------------------------------------
+
+model InventoryTransaction {
+  id               Int             @id @default(autoincrement())
+  productId        Int             @map("product_id")
+  variantId        Int?            @map("variant_id")
+  staffId          Int?            @map("staff_id")
+  type             String          // INITIAL, RESTOCK, ORDER_DEDUCTION, ADJUSTMENT, RETURN
+  quantityChange   Int             @map("quantity_change")
+  previousQuantity Int             @map("previous_quantity")
+  newQuantity      Int             @map("new_quantity")
+  reason           String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  product          Product         @relation(fields: [productId], references: [id])
+  variant          ProductVariant? @relation(fields: [variantId], references: [id])
+  staff            Staff?          @relation(fields: [staffId], references: [id])
+
+  @@index([productId])
+  @@index([variantId])
+  @@index([createdAt])
+  @@map("inventory_transactions")
+}
+
+// -------------------------------------------------------------
+// SHOPPING CART (Non-locking availability viewer)
+// -------------------------------------------------------------
+
+model Cart {
+  id        Int        @id @default(autoincrement())
+  userId    Int        @unique @map("user_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id])
+  items     CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        Int             @id @default(autoincrement())
+  cartId    Int             @map("cart_id")
+  productId Int             @map("product_id")
+  variantId Int?            @map("variant_id")
+  quantity  Int             @default(1)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  cart      Cart            @relation(fields: [cartId], references: [id])
+  product   Product         @relation(fields: [productId], references: [id])
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@unique([cartId, productId, variantId])
+  @@map("cart_items")
+}
+
+// -------------------------------------------------------------
+// ORDERS & ORDER ITEMS
+// -------------------------------------------------------------
+
+model Order {
+  id                  Int                       @id @default(autoincrement())
+  orderNumber         String                    @unique @map("order_number")
+  userId              Int                       @map("user_id")
+  subtotal            Decimal                   @db.Decimal(10, 2)
+  discountAmount      Decimal                   @default(0.00) @db.Decimal(10, 2) @map("discount_amount")
+  shippingFee         Decimal                   @default(0.00) @db.Decimal(10, 2) @map("shipping_fee")
+  taxAmount           Decimal                   @default(0.00) @db.Decimal(10, 2) @map("tax_amount")
+  totalAmount         Decimal                   @db.Decimal(10, 2) @map("total_amount")
+  orderStatus         String                    @default("PENDING") @map("order_status") // PENDING, CONFIRMED, PROCESSING, PACKED, SHIPPED, OUT_FOR_DELIVERY, DELIVERED, CANCELLED, RETURN_REQUESTED, RETURNED, REFUNDED
+  paymentStatus       String                    @default("UNPAID") @map("payment_status") // UNPAID, PENDING_COD, PAID, FAILED, REFUNDED
+  shippingAddressJson String                    @db.Text @map("shipping_address_json")
+  billingAddressJson  String?                   @db.Text @map("billing_address_json")
+  notes               String?                   @db.Text
+  deletedAt           DateTime?                 @map("deleted_at")
+  deletedBy           Int?                      @map("deleted_by")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  user                User                      @relation(fields: [userId], references: [id])
+  items               OrderItem[]
+  payments            Payment[]
+  deliveryAssignments OrderDeliveryAssignment[]
+  reviews             Review[]
+
+  @@index([userId])
+  @@index([orderStatus])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  Int             @id @default(autoincrement())
+  orderId             Int             @map("order_id")
+  productId           Int             @map("product_id")
+  variantId           Int?            @map("variant_id")
+  quantity            Int
+  unitPrice           Decimal         @db.Decimal(10, 2) @map("unit_price")
+  totalPrice          Decimal         @db.Decimal(10, 2) @map("total_price")
+  productSnapshotJson String          @db.Text @map("product_snapshot_json")
+  deletedAt           DateTime?       @map("deleted_at")
+  deletedBy           Int?            @map("deleted_by")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  order               Order           @relation(fields: [orderId], references: [id])
+  product             Product         @relation(fields: [productId], references: [id])
+  variant             ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+// -------------------------------------------------------------
+// PAYMENT GATEWAYS & PAYMENTS (Encrypted Secrets + Immutable Ledger)
+// -------------------------------------------------------------
+
+model PaymentGateway {
+  id                     Int       @id @default(autoincrement())
+  code                   String    @unique // RAZORPAY, STRIPE, COD, MOCK
+  name                   String
+  isEnabled              Boolean   @default(false) @map("is_enabled")
+  mode                   String    @default("TEST") // TEST, LIVE
+  keyId                  String?   @map("key_id")
+  encryptedSecretKey     String?   @db.Text @map("encrypted_secret_key")
+  encryptedWebhookSecret String?   @db.Text @map("encrypted_webhook_secret")
+  supportedMethodsJson   String?   @db.Text @map("supported_methods_json")
+  deletedAt              DateTime? @map("deleted_at")
+  deletedBy              Int?      @map("deleted_by")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("payment_gateways")
+}
+
+model Payment {
+  id                  Int       @id @default(autoincrement())
+  orderId             Int       @map("order_id")
+  gatewayCode         String    @map("gateway_code")
+  transactionId       String?   @map("transaction_id")
+  amount              Decimal   @db.Decimal(10, 2)
+  currency            String    @default("INR")
+  status              String    @default("PENDING") // PENDING, COMPLETED, FAILED, REFUNDED
+  gatewayResponseJson String?   @db.Text @map("gateway_response_json")
+  verifiedAt          DateTime? @map("verified_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  order               Order     @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@index([transactionId])
+  @@index([status])
+  @@map("payments")
+}
+
+// -------------------------------------------------------------
+// DELIVERY PARTNERS & ASSIGNMENTS
+// -------------------------------------------------------------
+
+model DeliveryPartner {
+  id                  Int                       @id @default(autoincrement())
+  partnerCode         String                    @unique @map("partner_code")
+  name                String
+  contactPhone        String?                   @map("contact_phone")
+  contactEmail        String?                   @map("contact_email")
+  trackingUrlTemplate String?                   @map("tracking_url_template")
+  isActive            Boolean                   @default(true) @map("is_active")
+  deletedAt           DateTime?                 @map("deleted_at")
+  deletedBy           Int?                      @map("deleted_by")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  assignments         OrderDeliveryAssignment[]
+
+  @@map("delivery_partners")
+}
+
+model OrderDeliveryAssignment {
+  id                Int             @id @default(autoincrement())
+  orderId           Int             @map("order_id")
+  deliveryPartnerId Int             @map("delivery_partner_id")
+  trackingNumber    String?         @map("tracking_number")
+  assignedAt        DateTime        @default(now()) @map("assigned_at")
+  status            String          @default("ASSIGNED") // ASSIGNED, PICKED_UP, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, FAILED
+  notes             String?         @db.Text
+  deletedAt         DateTime?       @map("deleted_at")
+  deletedBy         Int?            @map("deleted_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  order             Order           @relation(fields: [orderId], references: [id])
+  deliveryPartner   DeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])
+
+  @@index([orderId])
+  @@index([deliveryPartnerId])
+  @@map("order_delivery_assignments")
+}
+
+// -------------------------------------------------------------
+// PRODUCT REVIEWS & RATINGS (Verified Purchase Enforced)
+// -------------------------------------------------------------
+
+model Review {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  productId Int       @map("product_id")
+  orderId   Int       @map("order_id")
+  rating    Int
+  title     String
+  comment   String    @db.Text
+  status    String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy Int?      @map("deleted_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user      User      @relation(fields: [userId], references: [id])
+  product   Product   @relation(fields: [productId], references: [id])
+  order     Order     @relation(fields: [orderId], references: [id])
+
+  @@unique([userId, orderId, productId])
+  @@index([productId, status])
+  @@map("reviews")
+}
+
+// -------------------------------------------------------------
+// AUDIT LOGS (Append-Only / Immutable)
+// -------------------------------------------------------------
+
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  staffId      Int?     @map("staff_id")
+  action       String   // UPDATE_STOCK, UPDATE_PRICE, CHANGE_ORDER_STATUS, ASSIGN_DELIVERY, RESTORE, SOFT_DELETE, etc.
+  entityType   String   @map("entity_type")
+  entityId     String   @map("entity_id")
+  oldValueJson String?  @db.Text @map("old_value_json")
+  newValueJson String?  @db.Text @map("new_value_json")
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  staff        Staff?   @relation(fields: [staffId], references: [id])
+
+  @@index([staffId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// -------------------------------------------------------------
+// NOTIFICATION LOGS (Append-Only / Immutable)
+// -------------------------------------------------------------
+
+model NotificationLog {
+  id        Int      @id @default(autoincrement())
+  recipient String
+  channel   String   // EMAIL, SMS
+  subject   String?
+  content   String   @db.Text
+  status    String   @default("SENT")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([recipient])
+  @@index([createdAt])
+  @@map("notification_logs")
+}

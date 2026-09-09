@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 450" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#f1f5f9"/>
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d97706"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="450" fill="url(#bgGrad)"/>
+  <rect x="20" y="20" width="560" height="410" rx="20" fill="none" stroke="#e2e8f0" stroke-width="2" stroke-dasharray="6 6"/>
+  
+  <!-- Food / Herb Emblem Icon -->
+  <g transform="translate(300, 180)">
+    <circle r="60" fill="#fef3c7" stroke="#fde68a" stroke-width="2"/>
+    <!-- Bowl & Leaves Icon -->
+    <path d="M-32,5 C-32,28 32,28 32,5 Z" fill="url(#primaryGrad)"/>
+    <path d="M-36,5 L36,5" stroke="#92400e" stroke-width="3" stroke-linecap="round"/>
+    <!-- Steam / Herb Leaf -->
+    <path d="M-12,-15 C-12,-32 0,-35 0,-15 C0,-32 12,-35 12,-15" fill="none" stroke="#16a34a" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="-40" r="4" fill="#16a34a"/>
+  </g>
+
+  <!-- Branded Text -->
+  <text x="300" y="295" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800" fill="#1e293b" letter-spacing="1">
+    AYNGARAN FOODS
+  </text>
+  <text x="300" y="325" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="600" fill="#94a3b8" letter-spacing="0.5">
+    Authentic &amp; Traditional Foods
+  </text>
+
+  <!-- Clear Placeholder Notice -->
+  <g transform="translate(210, 350)">
+    <rect width="180" height="28" rx="14" fill="#e2e8f0"/>
+    <text x="90" y="18" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#64748b">
+      Product Image Pending
+    </text>
+  </g>
+</svg>
