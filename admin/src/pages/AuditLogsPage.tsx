@@ -10,24 +10,37 @@ import {
   X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { AuditLog } from '../types';
+import { AuditLog, PaginationMeta } from '../types';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { AdminModal } from '../components/AdminModal';
 
 export const AuditLogsPage: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [entityFilter, setEntityFilter] = useState('');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
 
   const fetchLogs = async () => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('limit', limit.toString());
       if (entityFilter) params.append('entityType', entityFilter);
-      params.append('limit', '80');
+      if (debouncedSearch) params.append('search', debouncedSearch);
 
       const res: any = await adminApi.get(`/audit-logs?${params.toString()}`);
-      setLogs(res.data || res || []);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setLogs(items);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load audit logs:', err);
     } finally {
@@ -36,18 +49,12 @@ export const AuditLogsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchLogs();
-  }, [entityFilter]);
+    setPage(1);
+  }, [entityFilter, debouncedSearch]);
 
-  const filteredLogs = logs.filter((l) => {
-    const q = search.toLowerCase();
-    return (
-      l.action.toLowerCase().includes(q) ||
-      l.entityType.toLowerCase().includes(q) ||
-      (l.staff && l.staff.name.toLowerCase().includes(q)) ||
-      (l.staff && l.staff.staffCode.toLowerCase().includes(q))
-    );
-  });
+  useEffect(() => {
+    fetchLogs();
+  }, [page, limit, entityFilter, debouncedSearch]);
 
   const getActionBadge = (action: string) => {
     if (action.includes('DELETE')) {
@@ -168,7 +175,7 @@ export const AuditLogsPage: React.FC = () => {
                     Loading activity records...
                   </td>
                 </tr>
-              ) : filteredLogs.length === 0 ? (
+              ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
                     <div>No activity records found matching criteria.</div>
@@ -187,7 +194,7 @@ export const AuditLogsPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
+                logs.map((log) => (
                   <tr key={log.id}>
                     <td>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: '#64748b' }}>
@@ -237,97 +244,88 @@ export const AuditLogsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          pagination={pagination}
+          onPageChange={(p) => setPage(p)}
+          onLimitChange={(l) => {
+            setLimit(l);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* JSON Inspector Modal */}
-      {selectedLog && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '42rem', width: '100%', maxHeight: '85vh', borderRadius: '1.25rem', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '1.25rem 1.75rem', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc' }}>
-              <div>
-                <span style={{ fontSize: '0.75rem', color: '#b45309', fontWeight: 700 }}>ACTIVITY #{selectedLog.id}</span>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
-                  {selectedLog.action} on {selectedLog.entityType}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedLog(null)}
-                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div style={{ padding: '1.75rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div>
-                <h5 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
-                  Updated Record State
-                </h5>
-                <pre
-                  style={{
-                    backgroundColor: '#f8fafc',
-                    padding: '1rem',
-                    borderRadius: '0.75rem',
-                    border: '1px solid #e2e8f0',
-                    fontSize: '0.78rem',
-                    color: '#047857',
-                    fontFamily: 'var(--font-mono)',
-                    overflowX: 'auto',
-                  }}
-                >
-                  {(() => {
-                    try {
-                      return JSON.stringify(JSON.parse(selectedLog.newValueJson || '{}'), null, 2);
-                    } catch {
-                      return selectedLog.newValueJson || 'None';
-                    }
-                  })()}
-                </pre>
-              </div>
-
-              {selectedLog.oldValueJson && (
-                <div>
-                  <h5 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
-                    Previous Record State
-                  </h5>
-                  <pre
-                    style={{
-                      backgroundColor: '#f8fafc',
-                      padding: '1rem',
-                      borderRadius: '0.75rem',
-                      border: '1px solid #e2e8f0',
-                      fontSize: '0.78rem',
-                      color: '#475569',
-                      fontFamily: 'var(--font-mono)',
-                      overflowX: 'auto',
-                    }}
-                  >
-                    {(() => {
-                      try {
-                        return JSON.stringify(JSON.parse(selectedLog.oldValueJson || '{}'), null, 2);
-                      } catch {
-                        return selectedLog.oldValueJson || 'None';
-                      }
-                    })()}
-                  </pre>
-                </div>
-              )}
-            </div>
-          </div>
+      <AdminModal
+        isOpen={!!selectedLog}
+        onClose={() => setSelectedLog(null)}
+        title={`${selectedLog?.action || ''} on ${selectedLog?.entityType || ''}`}
+        subtitle={`ACTIVITY #${selectedLog?.id || ''}`}
+        maxWidth="42rem"
+        footer={
+          <button
+            onClick={() => setSelectedLog(null)}
+            className="btn-secondary"
+            style={{ fontSize: '0.82rem' }}
+          >
+            Close
+          </button>
+        }
+      >
+        <div>
+          <h5 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
+            Updated Record State
+          </h5>
+          <pre
+            style={{
+              backgroundColor: '#f8fafc',
+              padding: '1rem',
+              borderRadius: '0.75rem',
+              border: '1px solid #e2e8f0',
+              fontSize: '0.78rem',
+              color: '#047857',
+              fontFamily: 'var(--font-mono)',
+              overflowX: 'auto',
+            }}
+          >
+            {(() => {
+              try {
+                return JSON.stringify(JSON.parse(selectedLog?.newValueJson || '{}'), null, 2);
+              } catch {
+                return selectedLog?.newValueJson || 'None';
+              }
+            })()}
+          </pre>
         </div>
-      )}
+
+        {selectedLog?.oldValueJson && (
+          <div>
+            <h5 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748b', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
+              Previous Record State
+            </h5>
+            <pre
+              style={{
+                backgroundColor: '#f8fafc',
+                padding: '1rem',
+                borderRadius: '0.75rem',
+                border: '1px solid #e2e8f0',
+                fontSize: '0.78rem',
+                color: '#475569',
+                fontFamily: 'var(--font-mono)',
+                overflowX: 'auto',
+              }}
+            >
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(selectedLog.oldValueJson || '{}'), null, 2);
+                } catch {
+                  return selectedLog.oldValueJson || 'None';
+                }
+              })()}
+            </pre>
+          </div>
+        )}
+      </AdminModal>
     </div>
   );
 };

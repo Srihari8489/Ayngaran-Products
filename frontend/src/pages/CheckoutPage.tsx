@@ -9,6 +9,9 @@ import {
   ArrowRight,
   MapPin,
   Lock,
+  Plus,
+  Edit,
+  Check,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -16,13 +19,32 @@ import { useCart } from '../context/CartContext';
 import { UserAddress } from '../types';
 
 export const CheckoutPage: React.FC = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, refreshProfile } = useAuth();
   const { cart, refreshCart } = useCart();
   const navigate = useNavigate();
 
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
   const [isAddingNewAddress, setIsAddingNewAddress] = useState(false);
+
+  // Profile Completion Modal state
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileData, setProfileData] = useState({
+    name: user?.name && user.name !== 'Customer' ? user.name : '',
+    email: user?.email || '',
+  });
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState('');
+
+  // Sync profileData when user loads
+  useEffect(() => {
+    if (user) {
+      setProfileData({
+        name: user.name && user.name !== 'Customer' ? user.name : '',
+        email: user.email || '',
+      });
+    }
+  }, [user]);
 
   // New Address form
   const [newAddress, setNewAddress] = useState({
@@ -44,12 +66,113 @@ export const CheckoutPage: React.FC = () => {
   const [paymentModalData, setPaymentModalData] = useState<any | null>(null);
   const [isVerifyingPayment, setIsVerifyingPayment] = useState(false);
 
+  // Address Modal (Add / Edit) state
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<number | null>(null);
+  const [addressForm, setAddressForm] = useState({
+    recipientName: '',
+    phone: '',
+    addressLine1: '',
+    addressLine2: '',
+    city: 'Coimbatore',
+    state: 'Tamil Nadu',
+    pincode: '641004',
+    country: 'India',
+    isDefault: false,
+  });
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [addressError, setAddressError] = useState('');
+  const [addressSuccessMsg, setAddressSuccessMsg] = useState('');
+
+  const openAddAddressModal = () => {
+    setEditingAddressId(null);
+    setAddressForm({
+      recipientName: user?.name && user.name !== 'Customer' ? user.name : '',
+      phone: user?.phone || '',
+      addressLine1: '',
+      addressLine2: '',
+      city: 'Coimbatore',
+      state: 'Tamil Nadu',
+      pincode: '641004',
+      country: 'India',
+      isDefault: addresses.length === 0,
+    });
+    setAddressError('');
+    setIsAddressModalOpen(true);
+  };
+
+  const openEditAddressModal = (addr: UserAddress) => {
+    setEditingAddressId(addr.id);
+    setAddressForm({
+      recipientName: addr.recipientName || '',
+      phone: addr.phone || '',
+      addressLine1: addr.addressLine1 || '',
+      addressLine2: addr.addressLine2 || '',
+      city: addr.city || 'Coimbatore',
+      state: addr.state || 'Tamil Nadu',
+      pincode: addr.pincode || '641004',
+      country: addr.country || 'India',
+      isDefault: addr.isDefault || false,
+    });
+    setAddressError('');
+    setIsAddressModalOpen(true);
+  };
+
+  const fetchAddresses = async () => {
+    try {
+      const res: any = await api.get('/auth/customer/addresses');
+      const addrs = Array.isArray(res) ? res : (res.addresses || []);
+      setAddresses(addrs);
+      return addrs;
+    } catch {
+      try {
+        const profile: any = await api.get('/auth/customer/profile');
+        const addrs = profile.addresses || [];
+        setAddresses(addrs);
+        return addrs;
+      } catch {
+        return [];
+      }
+    }
+  };
+
+  const handleSaveAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddressError('');
+    setIsSavingAddress(true);
+
+    try {
+      if (editingAddressId) {
+        await api.patch(`/auth/customer/addresses/${editingAddressId}`, addressForm);
+        setAddressSuccessMsg('Address updated successfully!');
+      } else {
+        const created: any = await api.post('/auth/customer/addresses', addressForm);
+        setAddressSuccessMsg('New delivery address saved to your account!');
+        if (created?.id) {
+          setSelectedAddressId(created.id);
+        }
+      }
+
+      const updatedList = await fetchAddresses();
+      if (!editingAddressId && updatedList.length > 0) {
+        const lastAdded = updatedList[updatedList.length - 1];
+        if (lastAdded) setSelectedAddressId(lastAdded.id);
+      }
+      setIsAddingNewAddress(false);
+      setIsAddressModalOpen(false);
+      setTimeout(() => setAddressSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setAddressError(err.message || 'Failed to save address.');
+    } finally {
+      setIsSavingAddress(false);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
-      api.get('/auth/customer/profile').then((res: any) => {
-        setAddresses(res.addresses || []);
-        if (res.addresses && res.addresses.length > 0) {
-          const defaultAddr = res.addresses.find((a: any) => a.isDefault) || res.addresses[0];
+      fetchAddresses().then((addrs) => {
+        if (addrs && addrs.length > 0) {
+          const defaultAddr = addrs.find((a: any) => a.isDefault) || addrs[0];
           setSelectedAddressId(defaultAddr.id);
         } else {
           setIsAddingNewAddress(true);
@@ -84,12 +207,45 @@ export const CheckoutPage: React.FC = () => {
 
   const subtotal = cart.subtotal;
   const shippingFee = subtotal >= 1000 ? 0 : 99;
-  const taxAmount = Math.round(subtotal * 0.18 * 100) / 100;
+  const taxAmount = cart.taxAmount !== undefined
+    ? cart.taxAmount
+    : Math.round(cart.items.reduce((sum, item) => sum + (item.gstAmount ?? item.totalPrice * ((item.gstRate ?? 5) / 100)), 0) * 100) / 100;
   const totalAmount = subtotal + shippingFee + taxAmount;
+
+  const handleSaveProfileAndContinue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profileData.name.trim() || profileData.name.trim() === 'Customer') {
+      setProfileError('Please enter your full name to complete your profile.');
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+      setProfileError('');
+      await api.put('/auth/customer/profile', {
+        name: profileData.name.trim(),
+        email: profileData.email.trim(),
+      });
+      await refreshProfile();
+      setIsProfileModalOpen(false);
+    } catch (err: any) {
+      setProfileError(err.message || 'Failed to update profile details.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+
+    // Check if profile details are completed before placing order
+    const isProfileComplete = user?.name && user.name.trim() !== '' && user.name.trim() !== 'Customer';
+    if (!isProfileComplete) {
+      setIsProfileModalOpen(true);
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
@@ -171,118 +327,208 @@ export const CheckoutPage: React.FC = () => {
         {/* Left Column: Delivery Address & Payment Method */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
           {/* 1. Address Section */}
-          <div style={{ backgroundColor: '#ffffff', borderRadius: '1rem', border: '1px solid var(--border-color)', padding: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <MapPin size={20} color="var(--primary-600)" />
-                <h3 style={{ fontSize: '1.15rem' }}>1. Delivery Address</h3>
+          <div style={{ backgroundColor: '#ffffff', borderRadius: '1rem', border: '2px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ padding: '0.4rem 0.6rem', background: '#f0fdf4', borderRadius: '0.5rem', color: '#1a3d2b', display: 'flex', alignItems: 'center' }}>
+                  <MapPin size={22} color="#1a3d2b" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a3d2b', margin: 0 }}>1. Delivery Address Selection</h3>
+                  <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0 }}>Choose or manage your delivery destination</p>
+                </div>
               </div>
-              {addresses.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsAddingNewAddress(!isAddingNewAddress)}
-                  style={{ color: 'var(--primary-600)', fontSize: '0.85rem', fontWeight: 600 }}
-                >
-                  {isAddingNewAddress ? 'Select Saved Address' : '+ Add New Address'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => openAddAddressModal()}
+                className="btn-primary"
+                style={{ padding: '0.5rem 0.9rem', fontSize: '0.82rem', fontWeight: 800, borderRadius: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              >
+                <Plus size={15} /> Add New Address
+              </button>
             </div>
 
-            {!isAddingNewAddress && addresses.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {addresses.map((addr) => (
-                  <label
-                    key={addr.id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '0.75rem',
-                      padding: '1rem',
-                      borderRadius: '0.65rem',
-                      border: `2px solid ${selectedAddressId === addr.id ? 'var(--primary-600)' : 'var(--border-color)'}`,
-                      backgroundColor: selectedAddressId === addr.id ? 'var(--primary-50)' : '#ffffff',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="address"
-                      checked={selectedAddressId === addr.id}
-                      onChange={() => setSelectedAddressId(addr.id)}
-                      style={{ accentColor: 'var(--primary-600)', marginTop: '0.2rem' }}
-                    />
-                    <div>
-                      <span style={{ fontWeight: 700, fontSize: '0.92rem' }}>{addr.recipientName}</span>
-                      <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>{addr.phone}</span>
-                      <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                        {addr.addressLine1}, {addr.city}, {addr.state} - {addr.pincode}
-                      </p>
-                    </div>
-                  </label>
-                ))}
+            {addressSuccessMsg && (
+              <div style={{ padding: '0.75rem 1rem', background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: '0.625rem', fontSize: '0.85rem', fontWeight: 700, marginBottom: '1.25rem' }}>
+                ✓ {addressSuccessMsg}
+              </div>
+            )}
+
+            {/* Address Selection Grid */}
+            {addresses.length === 0 ? (
+              <div style={{ padding: '2rem 1.5rem', borderRadius: '0.875rem', background: '#fafaf9', border: '2px dashed #cbd5e1', textAlign: 'center' }}>
+                <MapPin size={36} color="#94a3b8" style={{ marginBottom: '0.5rem' }} />
+                <h4 style={{ fontWeight: 800, color: '#334155', marginBottom: '0.35rem' }}>No Saved Delivery Addresses Found</h4>
+                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>Please add a delivery address to complete your order.</p>
+                <button
+                  type="button"
+                  onClick={() => openAddAddressModal()}
+                  className="btn-primary"
+                  style={{ padding: '0.65rem 1.25rem', fontSize: '0.88rem', fontWeight: 700 }}
+                >
+                  ➕ Add New Delivery Address
+                </button>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Recipient Name</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    required
-                    value={newAddress.recipientName}
-                    onChange={(e) => setNewAddress({ ...newAddress, recipientName: e.target.value })}
-                  />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {/* Scrollable Address List Container */}
+                <div
+                  style={{
+                    maxHeight: '265px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                    paddingRight: addresses.length > 2 ? '0.35rem' : '0',
+                    paddingBottom: '2px',
+                  }}
+                >
+                  {addresses.map((a) => {
+                    const isSelected = selectedAddressId === a.id;
+                    return (
+                      <div
+                        key={a.id}
+                        onClick={() => {
+                          setSelectedAddressId(a.id);
+                          setIsAddingNewAddress(false);
+                        }}
+                        style={{
+                          position: 'relative',
+                          padding: '1rem 1.25rem',
+                          borderRadius: '0.75rem',
+                          border: isSelected ? '2px solid #113926' : '1.5px solid #e2e8f0',
+                          backgroundColor: isSelected ? '#f0fdf4' : '#ffffff',
+                          boxShadow: isSelected ? '0 4px 14px rgba(17, 57, 38, 0.08)' : '0 1px 3px rgba(0,0,0,0.02)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '1rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {/* Left Radio indicator */}
+                        <div style={{ paddingTop: '0.2rem' }}>
+                          <div
+                            style={{
+                              width: '1.25rem',
+                              height: '1.25rem',
+                              borderRadius: '50%',
+                              border: isSelected ? '5px solid #113926' : '2px solid #cbd5e1',
+                              background: '#ffffff',
+                              boxSizing: 'border-box',
+                              flexShrink: 0,
+                              transition: 'all 0.2s ease',
+                            }}
+                          />
+                        </div>
+
+                        {/* Middle Address Content */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                            <span style={{ fontWeight: 800, fontSize: '1rem', color: isSelected ? '#113926' : '#0f172a' }}>
+                              {a.recipientName}
+                            </span>
+                            {a.isDefault && (
+                              <span style={{ background: '#113926', color: '#86efac', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '9999px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                Default
+                              </span>
+                            )}
+                            {isSelected && (
+                              <span style={{ background: '#16a34a', color: '#ffffff', fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '9999px' }}>
+                                Selected
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Full address line */}
+                          <p style={{ fontSize: '0.88rem', color: '#475569', lineHeight: 1.45, margin: '0 0 0.35rem 0' }}>
+                            {a.addressLine1}{a.addressLine2 ? `, ${a.addressLine2}` : ''}, {a.city}, {a.state} - <strong style={{ color: '#0f172a' }}>{a.pincode}</strong>
+                          </p>
+
+                          {/* Phone number */}
+                          <p style={{ fontSize: '0.82rem', color: '#113926', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <span>📞</span> {a.phone}
+                          </p>
+                        </div>
+
+                        {/* Right Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, alignSelf: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditAddressModal(a);
+                            }}
+                            style={{
+                              background: '#ffffff',
+                              border: '1.5px solid #cbd5e1',
+                              color: '#113926',
+                              fontSize: '0.8rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              padding: '0.4rem 0.75rem',
+                              borderRadius: '0.5rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                              transition: 'all 0.15s ease',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = '#113926';
+                              e.currentTarget.style.background = '#f8fafc';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = '#cbd5e1';
+                              e.currentTarget.style.background = '#ffffff';
+                            }}
+                          >
+                            <Edit size={14} /> Edit
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Contact Phone</label>
-                  <input
-                    type="tel"
-                    className="input-field"
-                    required
-                    value={newAddress.phone}
-                    onChange={(e) => setNewAddress({ ...newAddress, phone: e.target.value })}
-                  />
-                </div>
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Address Line</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    required
-                    value={newAddress.addressLine1}
-                    onChange={(e) => setNewAddress({ ...newAddress, addressLine1: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>City</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    required
-                    value={newAddress.city}
-                    onChange={(e) => setNewAddress({ ...newAddress, city: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>State</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    required
-                    value={newAddress.state}
-                    onChange={(e) => setNewAddress({ ...newAddress, state: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.25rem' }}>Pincode</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    required
-                    value={newAddress.pincode}
-                    onChange={(e) => setNewAddress({ ...newAddress, pincode: e.target.value })}
-                  />
-                </div>
+
+                {/* Add New Address List Row option */}
+                <button
+                  type="button"
+                  onClick={() => openAddAddressModal()}
+                  style={{
+                    padding: '0.85rem 1.25rem',
+                    borderRadius: '0.75rem',
+                    border: '2px dashed #cbd5e1',
+                    backgroundColor: '#fafaf9',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.6rem',
+                    width: '100%',
+                    transition: 'all 0.2s ease',
+                    marginTop: '0.25rem',
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.borderColor = '#113926';
+                    e.currentTarget.style.backgroundColor = '#f0fdf4';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.borderColor = '#cbd5e1';
+                    e.currentTarget.style.backgroundColor = '#fafaf9';
+                  }}
+                >
+                  <div style={{ width: '1.75rem', height: '1.75rem', borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#113926' }}>
+                    <Plus size={15} />
+                  </div>
+                  <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#113926' }}>
+                    + Add New Delivery Address
+                  </span>
+                  <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                    (Deliver to another location)
+                  </span>
+                </button>
               </div>
             )}
           </div>
@@ -416,7 +662,7 @@ export const CheckoutPage: React.FC = () => {
                   <div style={{ flex: 1, paddingRight: '1rem' }}>
                     <span style={{ fontWeight: 600 }}>{item.productName}</span>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>
-                      Qty: {item.quantity} {item.variantDescription ? `• ${item.variantDescription}` : ''}
+                      Qty: {item.quantity} {item.variantDescription ? `• ${item.variantDescription}` : ''} {item.gstRate !== undefined ? `• GST ${item.gstRate}%` : ''}
                     </span>
                   </div>
                   <span style={{ fontWeight: 700 }}>₹{item.totalPrice.toLocaleString()}</span>
@@ -437,7 +683,7 @@ export const CheckoutPage: React.FC = () => {
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>GST (18% included)</span>
+                <span style={{ color: 'var(--text-muted)' }}>Applicable GST</span>
                 <span style={{ fontWeight: 600 }}>₹{taxAmount.toLocaleString()}</span>
               </div>
 
@@ -555,6 +801,303 @@ export const CheckoutPage: React.FC = () => {
             >
               Cancel Payment
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Complete Profile Required Modal ── */}
+      {isProfileModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(10, 25, 15, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 120,
+            padding: '1rem',
+          }}
+        >
+          <div
+            className="glass-panel animate-fadeIn"
+            style={{
+              width: '100%',
+              maxWidth: '460px',
+              borderRadius: '1.25rem',
+              padding: '2.25rem 2rem',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
+              border: '2px solid #8b7d2a',
+            }}
+          >
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: '#fefce8',
+                border: '2px solid #d4c56a',
+                color: '#8b7d2a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem',
+              }}
+            >
+              <ShieldCheck size={34} />
+            </div>
+
+            <h3 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#1a3d2b', marginBottom: '0.4rem', fontFamily: 'Outfit', textAlign: 'center' }}>
+              Complete Your Profile Details
+            </h3>
+
+            <p style={{ fontSize: '0.88rem', color: '#64748b', marginBottom: '1.5rem', lineHeight: 1.5, textAlign: 'center' }}>
+              Authentication is verified via your phone number (<strong>{user?.phone}</strong>). Please complete your Full Name &amp; Email address before placing an order.
+            </p>
+
+            {profileError && (
+              <div style={{ padding: '0.75rem', borderRadius: '0.625rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#e11d48', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                ⚠️ {profileError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveProfileAndContinue} style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Hari Prasad"
+                  value={profileData.name}
+                  onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
+                  className="input-field"
+                  style={{ fontSize: '0.92rem', padding: '0.7rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Email Address (for invoice &amp; tracking updates)
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. customer@example.com"
+                  value={profileData.email}
+                  onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                  className="input-field"
+                  style={{ fontSize: '0.92rem', padding: '0.7rem' }}
+                />
+              </div>
+
+              <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="btn-primary"
+                  style={{ width: '100%', padding: '0.85rem', fontSize: '1rem', fontWeight: 800 }}
+                >
+                  <CheckCircle2 size={18} />
+                  <span>{isSavingProfile ? 'Saving Details...' : 'Save & Proceed to Order'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsProfileModalOpen(false)}
+                  style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.85rem', padding: '0.4rem', cursor: 'pointer', textAlign: 'center' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add / Edit Address Modal ── */}
+      {isAddressModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(10, 25, 15, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 130,
+            padding: '1rem',
+          }}
+        >
+          <div
+            className="glass-panel animate-fadeIn"
+            style={{
+              width: '100%',
+              maxWidth: '540px',
+              borderRadius: '1.25rem',
+              padding: '2rem',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 25px 50px rgba(0,0,0,0.3)',
+              border: '2px solid #2d6a4f',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <MapPin size={22} color="#1a3d2b" />
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1a3d2b', margin: 0, fontFamily: 'Outfit' }}>
+                  {editingAddressId ? 'Edit Delivery Address' : 'Add New Delivery Address'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddressModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '1.2rem', cursor: 'pointer', fontWeight: 800 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {addressError && (
+              <div style={{ padding: '0.75rem', borderRadius: '0.625rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#e11d48', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                ⚠️ {addressError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveAddress} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Recipient Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Hari Prasad"
+                  value={addressForm.recipientName}
+                  onChange={(e) => setAddressForm({ ...addressForm, recipientName: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Contact Phone *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="e.g. 9876543210"
+                  value={addressForm.phone}
+                  onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Address Line 1 (House No, Building, Street) *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 12, Main Street, Gandhipuram"
+                  value={addressForm.addressLine1}
+                  onChange={(e) => setAddressForm({ ...addressForm, addressLine1: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Address Line 2 / Landmark (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Near Bus Stand"
+                  value={addressForm.addressLine2}
+                  onChange={(e) => setAddressForm({ ...addressForm, addressLine2: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  City *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Coimbatore"
+                  value={addressForm.city}
+                  onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  State *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Tamil Nadu"
+                  value={addressForm.state}
+                  onChange={(e) => setAddressForm({ ...addressForm, state: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Pincode *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 641004"
+                  value={addressForm.pincode}
+                  onChange={(e) => setAddressForm({ ...addressForm, pincode: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Country
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={addressForm.country}
+                  className="input-field"
+                  style={{ backgroundColor: '#f1f5f9' }}
+                />
+              </div>
+
+              <div style={{ gridColumn: 'span 2', marginTop: '0.5rem', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsAddressModalOpen(false)}
+                  className="btn-secondary"
+                  style={{ padding: '0.7rem 1.25rem' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAddress}
+                  className="btn-primary"
+                  style={{ padding: '0.7rem 1.5rem', fontWeight: 800 }}
+                >
+                  {isSavingAddress ? 'Saving...' : (editingAddressId ? 'Update Address' : 'Save & Select Address')}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

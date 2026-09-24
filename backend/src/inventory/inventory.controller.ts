@@ -20,8 +20,8 @@ export class InventoryController {
 
   @RequirePermissions('INVENTORY_MANAGE')
   @Get()
-  async getStockOverview() {
-    return this.inventoryService.getStockOverview();
+  async getStockOverview(@Query() query?: any) {
+    return this.inventoryService.getStockOverview(query);
   }
 
   @RequirePermissions('INVENTORY_MANAGE')
@@ -38,13 +38,7 @@ export class InventoryController {
 
   @RequirePermissions('INVENTORY_MANAGE')
   @Get('history')
-  async getHistory(
-    @Query('productId') productId?: string,
-    @Query('variantId') variantId?: string,
-  ) {
-    return this.inventoryService.getHistory(
-      productId ? Number(productId) : undefined,
-      variantId ? Number(variantId) : undefined,
-    );
+  async getHistory(@Query() query?: any) {
+    return this.inventoryService.getHistory(query);
   }
 }

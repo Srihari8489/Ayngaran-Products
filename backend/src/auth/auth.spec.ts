@@ -1,5 +1,6 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
+import { OtpDeliveryService } from './otp-delivery.service';
 import { JwtService } from '@nestjs/jwt';
 
 async function testAuth() {
@@ -11,15 +12,23 @@ async function testAuth() {
   const jwtService = new JwtService({
     secret: 'ayngaran_secret_jwt_key_2026_super_secure_access_token',
   });
+  const otpDeliveryService = new OtpDeliveryService();
 
-  const authService = new AuthService(prisma, jwtService);
+  const authService = new AuthService(prisma, jwtService, otpDeliveryService);
 
   try {
-    const testIdentifier = 'test_buyer@ayngaran.com';
+    const testIdentifier = '+919876543210';
 
     // 1. Request OTP
     const otpRes = await authService.requestCustomerOtp(testIdentifier);
-    console.log('  ✅ 1. Requested OTP successfully:', otpRes.devOtp);
+    console.log('  ✅ 1. Requested OTP successfully. WhatsApp URL:', otpRes.demoWhatsAppUrl);
+
+    // Fetch the OTP from db for testing verification
+    const otpRecord = await prisma.raw.otpRequest.findFirst({
+      where: { identifier: testIdentifier },
+      orderBy: { createdAt: 'desc' },
+    });
+    const testOtp = otpRecord?.otpHash || '123456';
 
     // 2. Test Cooldown (immediate request should be rejected)
     try {
@@ -46,7 +55,7 @@ async function testAuth() {
     }
 
     // 4. Test Correct OTP verification
-    const verifyRes = await authService.verifyCustomerOtp(testIdentifier, otpRes.devOtp!);
+    const verifyRes = await authService.verifyCustomerOtp(testIdentifier, testOtp);
     if (verifyRes.accessToken && verifyRes.user) {
       console.log('  ✅ 4. Correct OTP verified, User created, JWT tokens issued');
     } else {

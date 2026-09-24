@@ -7,23 +7,65 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { CreateAttributeValueDto } from './dto/create-attribute-value.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class AttributesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.client.attribute.findMany({
-      include: {
-        values: {
-          orderBy: { sortOrder: 'asc' },
+  async findAll(query?: any) {
+    if (!query || (!query.page && !query.limit && !query.search && !query.dataType)) {
+      return this.prisma.client.attribute.findMany({
+        include: {
+          values: {
+            orderBy: { sortOrder: 'asc' },
+          },
+          _count: {
+            select: { categoryAttributes: true },
+          },
         },
-        _count: {
-          select: { categoryAttributes: true },
+        orderBy: { name: 'asc' },
+      });
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (query.dataType && query.dataType !== 'ALL') {
+      where.dataType = query.dataType;
+    }
+
+    const searchTerm = (query.search || '').trim();
+    if (searchTerm) {
+      where.OR = [
+        { name: { contains: searchTerm } },
+        { slug: { contains: searchTerm } },
+        { unit: { contains: searchTerm } },
+      ];
+    }
+
+    const [total, attributes] = await Promise.all([
+      this.prisma.client.attribute.count({ where }),
+      this.prisma.client.attribute.findMany({
+        where,
+        include: {
+          values: {
+            orderBy: { sortOrder: 'asc' },
+          },
+          _count: {
+            select: { categoryAttributes: true },
+          },
         },
-      },
-      orderBy: { name: 'asc' },
-    });
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return createPaginatedResponse(attributes, total, page, limit);
   }
 
   async findOne(id: number) {

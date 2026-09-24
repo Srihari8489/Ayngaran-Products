@@ -46,6 +46,7 @@ export interface Category {
   image?: string;
   parentId?: number | null;
   sortOrder: number;
+  gstRate?: number;
   isActive: boolean;
   parent?: Category | null;
   children?: Category[];
@@ -121,6 +122,9 @@ export interface Product {
   brandId: number;
   basePrice: number;
   minStockAlert: number;
+  useCategoryGst?: boolean;
+  gstRate?: number | null;
+  effectiveGstRate?: number;
   status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
   category?: Category;
   brand?: Brand;
@@ -155,6 +159,8 @@ export interface OrderItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  gstRate?: number;
+  gstAmount?: number;
   snapshot: any;
 }
 
@@ -238,4 +244,41 @@ export interface DashboardSummary {
   recentOrders: Order[];
   recentAuditLogs: AuditLog[];
   ordersByStatus: Record<string, number>;
+}
+
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface Customer {
+  id: number;
+  userCode: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  orderCount: number;
+  reviewCount: number;
+  addressCount: number;
+  totalSpent: number;
+  addresses?: any[];
+  recentOrders?: any[];
+}
+
+export interface CustomerFeedback {
+  id: number;
+  name: string;
+  email: string;
+  rating: number;
+  feedback: string;
+  status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  createdAt: string;
+  updatedAt: string;
 }

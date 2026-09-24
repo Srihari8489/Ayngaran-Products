@@ -8,22 +8,40 @@ import {
   ShieldCheck,
   Package,
   User as UserIcon,
-  Clock
+  Clock,
+  Search,
+  X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { Review } from '../types';
+import { Review, PaginationMeta } from '../types';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
 
 export const ReviewsPage: React.FC = () => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
 
   const fetchReviews = async () => {
     try {
       setLoading(true);
-      const query = statusFilter !== 'ALL' ? `?status=${statusFilter}` : '';
-      const res: any = await adminApi.get(`/reviews/admin/all${query}`);
-      setReviews(res.data || res || []);
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('limit', limit.toString());
+      if (statusFilter !== 'ALL') params.append('status', statusFilter);
+      if (debouncedSearch) params.append('search', debouncedSearch);
+
+      const res: any = await adminApi.get(`/reviews/admin/all?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setReviews(items);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load reviews:', err);
     } finally {
@@ -32,8 +50,12 @@ export const ReviewsPage: React.FC = () => {
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [statusFilter, debouncedSearch]);
+
+  useEffect(() => {
     fetchReviews();
-  }, [statusFilter]);
+  }, [page, limit, statusFilter, debouncedSearch]);
 
   const handleModerate = async (id: number, status: 'APPROVED' | 'REJECTED') => {
     try {
@@ -66,27 +88,92 @@ export const ReviewsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
-        {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map((st) => (
-          <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
+      {/* Filter and Search Bar */}
+      <div
+        className="glass-card"
+        style={{
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          {['ALL', 'PENDING', 'APPROVED', 'REJECTED'].map((st) => {
+            const isActive = statusFilter === st;
+            return (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                style={{
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '0.5rem',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: isActive ? '#1a3d2b' : '#ffffff',
+                  color: isActive ? '#ffffff' : '#64748b',
+                  border: isActive ? '1px solid #1a3d2b' : '1px solid #e2e8f0',
+                  boxShadow: isActive ? '0 2px 6px rgba(26, 61, 43, 0.2)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {st === 'ALL' ? 'All Reviews' : st}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ position: 'relative', flex: 1, minWidth: '260px', maxWidth: '380px' }}>
+          <Search
+            size={16}
             style={{
-              padding: '0.45rem 0.9rem',
-              borderRadius: '0.5rem',
-              fontSize: '0.78rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              backgroundColor: statusFilter === st ? '#fef3c7' : '#ffffff',
-              color: statusFilter === st ? '#b45309' : '#64748b',
-              border: statusFilter === st ? '1px solid #f59e0b' : '1px solid #e2e8f0',
-              transition: 'all 0.15s ease',
+              position: 'absolute',
+              left: '0.9rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#94a3b8',
+              pointerEvents: 'none',
             }}
-          >
-            {st === 'ALL' ? 'All Reviews' : st}
-          </button>
-        ))}
+          />
+          <input
+            type="text"
+            placeholder="Search by title, comment, product..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="form-input"
+            style={{
+              paddingLeft: '2.6rem',
+              paddingRight: search ? '2.4rem' : '0.9rem',
+              fontSize: '0.875rem',
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              style={{
+                position: 'absolute',
+                right: '0.75rem',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '0.2rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="Clear search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Reviews List */}
@@ -97,7 +184,7 @@ export const ReviewsPage: React.FC = () => {
           </div>
         ) : reviews.length === 0 ? (
           <div className="glass-card" style={{ padding: '3rem', textAlign: 'center', color: '#64748b' }}>
-            No reviews found matching "{statusFilter}".
+            No reviews found matching criteria.
           </div>
         ) : (
           reviews.map((r) => (
@@ -206,6 +293,15 @@ export const ReviewsPage: React.FC = () => {
           ))
         )}
       </div>
+
+      <Pagination
+        pagination={pagination}
+        onPageChange={(p) => setPage(p)}
+        onLimitChange={(l) => {
+          setLimit(l);
+          setPage(1);
+        }}
+      />
     </div>
   );
 };

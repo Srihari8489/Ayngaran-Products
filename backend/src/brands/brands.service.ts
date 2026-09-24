@@ -6,20 +6,60 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBrandDto } from './dto/create-brand.dto';
 import { UpdateBrandDto } from './dto/update-brand.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class BrandsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.client.brand.findMany({
-      include: {
-        _count: {
-          select: { products: true },
+  async findAll(query?: any) {
+    if (!query || (!query.page && !query.limit && !query.search && !query.status)) {
+      return this.prisma.client.brand.findMany({
+        include: {
+          _count: {
+            select: { products: true },
+          },
         },
-      },
-      orderBy: { name: 'asc' },
-    });
+        orderBy: { name: 'asc' },
+      });
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (query.status && query.status !== 'ALL') {
+      where.isActive = query.status === 'ACTIVE';
+    }
+
+    const searchTerm = (query.search || '').trim();
+    if (searchTerm) {
+      where.OR = [
+        { name: { contains: searchTerm } },
+        { brandCode: { contains: searchTerm } },
+        { slug: { contains: searchTerm } },
+        { description: { contains: searchTerm } },
+      ];
+    }
+
+    const [total, brands] = await Promise.all([
+      this.prisma.client.brand.count({ where }),
+      this.prisma.client.brand.findMany({
+        where,
+        include: {
+          _count: {
+            select: { products: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return createPaginatedResponse(brands, total, page, limit);
   }
 
   async findOne(id: number) {

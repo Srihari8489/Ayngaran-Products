@@ -16,6 +16,11 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { ReportsModule } from './reports/reports.module';
 import { AuditModule } from './audit/audit.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { WishlistModule } from './wishlist/wishlist.module';
+import { InquiriesModule } from './inquiries/inquiries.module';
+import { NewsletterModule } from './newsletter/newsletter.module';
+import { UsersModule } from './users/users.module';
+import { FeedbackModule } from './feedback/feedback.module';
 
 @Module({
   imports: [
@@ -36,6 +41,11 @@ import { UploadsModule } from './uploads/uploads.module';
     ReportsModule,
     AuditModule,
     UploadsModule,
+    WishlistModule,
+    InquiriesModule,
+    NewsletterModule,
+    UsersModule,
+    FeedbackModule,
   ],
 })
 export class AppModule {}

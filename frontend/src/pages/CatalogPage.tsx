@@ -1,10 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { ChevronRight, SlidersHorizontal, ArrowUpDown, X } from 'lucide-react';
+import { ChevronRight, ArrowUpDown, X, Search } from 'lucide-react';
 import api from '../api/client';
 import { Product, Category } from '../types';
 import { ProductCard } from '../components/ProductCard';
-import { DynamicFilterSidebar } from '../components/DynamicFilterSidebar';
 
 export const CatalogPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -21,38 +20,40 @@ export const CatalogPage: React.FC = () => {
   const [currentCategory, setCurrentCategory] = useState<Category | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<any[]>([]);
   const [categoriesList, setCategoriesList] = useState<Category[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isFetching, setIsFetching] = useState(false);
 
-  // Dynamic filter states
-  const [selectedBrandId, setSelectedBrandId] = useState<number | null>(
-    brandIdParam ? Number(brandIdParam) : null,
-  );
-  const [minPrice, setMinPrice] = useState<number | null>(null);
-  const [maxPrice, setMaxPrice] = useState<number | null>(null);
-  const [selectedAttrs, setSelectedAttrs] = useState<Record<string, string>>({});
+  const categoryBarRef = useRef<HTMLDivElement>(null);
 
-  // Fetch category list for quick category browsing
+  // Fetch category list for quick browsing
   useEffect(() => {
     api.get('/categories/tree').then((res: any) => {
       setCategoriesList(res || []);
     });
   }, []);
 
-  // Sync category & breadcrumbs and scroll to top immediately
+  // Scroll to top on initial page mount only
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    if (document.documentElement) document.documentElement.scrollTop = 0;
-    if (document.body) document.body.scrollTop = 0;
+  }, []);
 
+  // Sync category details & breadcrumbs when categoryIdParam changes
+  useEffect(() => {
     if (categoryIdParam) {
       const catId = Number(categoryIdParam);
-      api.get(`/categories/${catId}`).then((res: any) => setCurrentCategory(res));
-      api.get(`/categories/${catId}/breadcrumbs`).then((res: any) => setBreadcrumbs(res || []));
+      // Immediately resolve from categoriesList if already cached for 0ms title update
+      const cached = categoriesList.find((c) => c.id === catId);
+      if (cached) {
+        setCurrentCategory(cached);
+        setBreadcrumbs([{ id: cached.id, name: cached.name, slug: cached.slug }]);
+      }
+      api.get(`/categories/${catId}`).then((res: any) => setCurrentCategory(res)).catch(() => {});
+      api.get(`/categories/${catId}/breadcrumbs`).then((res: any) => setBreadcrumbs(res || [])).catch(() => {});
     } else {
       setCurrentCategory(null);
       setBreadcrumbs([]);
     }
-  }, [categoryIdParam, queryParam]);
+  }, [categoryIdParam, categoriesList]);
 
   const handleSelectCategory = (catId: number | null) => {
     const params = new URLSearchParams(searchParams);
@@ -62,309 +63,415 @@ export const CatalogPage: React.FC = () => {
       params.delete('categoryId');
     }
     params.delete('page');
-    setSearchParams(params);
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    if (document.documentElement) document.documentElement.scrollTop = 0;
-    if (document.body) document.body.scrollTop = 0;
+    // Update URL without whole page reload or scrolling
+    setSearchParams(params, { replace: true });
   };
 
-
-  // Fetch products with active filters
+  // Fetch products
   useEffect(() => {
-    setIsLoading(true);
+    setIsFetching(true);
 
     const params: Record<string, any> = {
       page: pageParam,
-      limit: 12,
+      limit: 24,
       sort: sortParam,
     };
 
     if (categoryIdParam) params.categoryId = categoryIdParam;
-    if (selectedBrandId) params.brandId = selectedBrandId;
-    if (minPrice) params.minPrice = minPrice;
-    if (maxPrice) params.maxPrice = maxPrice;
+    if (brandIdParam) params.brandId = brandIdParam;
     if (queryParam) params.q = queryParam;
-
-    if (Object.keys(selectedAttrs).length > 0) {
-      params.attrs = JSON.stringify(selectedAttrs);
-    }
 
     api
       .get('/products', { params })
       .then((res: any) => {
-        setProducts(res.items || []);
-        setTotalProducts(res.pagination?.total || 0);
-        setTotalPages(res.pagination?.totalPages || 1);
+        const items = Array.isArray(res) ? res : (res?.items || res?.data || []);
+        const total = res?.pagination?.total ?? (Array.isArray(res) ? res.length : (res?.total ?? items.length));
+        const totalPages = res?.pagination?.totalPages ?? (Array.isArray(res) ? 1 : (res?.totalPages ?? 1));
+        setProducts(items);
+        setTotalProducts(total);
+        setTotalPages(totalPages);
+      })
+      .catch((err) => {
+        console.error('Failed to load products', err);
       })
       .finally(() => {
-        setIsLoading(false);
+        setIsFetching(false);
+        setIsInitialLoading(false);
       });
-  }, [categoryIdParam, selectedBrandId, minPrice, maxPrice, selectedAttrs, sortParam, pageParam, queryParam]);
-
-  const handleAttrChange = (slug: string, value: string | null) => {
-    setSelectedAttrs((prev) => {
-      const updated = { ...prev };
-      if (value === null) {
-        delete updated[slug];
-      } else {
-        updated[slug] = value;
-      }
-      return updated;
-    });
-  };
+  }, [categoryIdParam, brandIdParam, sortParam, pageParam, queryParam]);
 
   const handleResetFilters = () => {
-    setSelectedBrandId(null);
-    setMinPrice(null);
-    setMaxPrice(null);
-    setSelectedAttrs({});
     const newParams = new URLSearchParams();
     if (sortParam) newParams.set('sort', sortParam);
-    setSearchParams(newParams);
+    setSearchParams(newParams, { replace: true });
   };
 
   const handleClearSearch = () => {
     searchParams.delete('q');
     searchParams.delete('page');
-    setSearchParams(searchParams);
+    setSearchParams(searchParams, { replace: true });
   };
 
   const handleSortChange = (newSort: string) => {
     searchParams.set('sort', newSort);
-    setSearchParams(searchParams);
+    setSearchParams(searchParams, { replace: true });
   };
 
   return (
-    <div className="container" style={{ padding: '2rem 1.5rem 5rem' }}>
-      {/* Breadcrumb Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-        <Link to="/" style={{ color: 'var(--primary-600)' }}>Home</Link>
-        <ChevronRight size={14} />
-        <Link to="/catalog" style={{ color: !categoryIdParam && !queryParam ? 'var(--text-main)' : 'inherit' }}>Catalog</Link>
-        {breadcrumbs.map((b, idx) => (
-          <React.Fragment key={b.id}>
-            <ChevronRight size={14} />
-            <Link
-              to={`/catalog?categoryId=${b.id}`}
-              style={{
-                color: idx === breadcrumbs.length - 1 ? 'var(--text-main)' : 'inherit',
-                fontWeight: idx === breadcrumbs.length - 1 ? 600 : 400,
-              }}
-            >
-              {b.name}
-            </Link>
-          </React.Fragment>
-        ))}
-      </div>
+    <div style={{ paddingBottom: '5rem' }}>
 
-      {/* Catalog Title & Sort Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>
-            {currentCategory ? currentCategory.name : queryParam ? `Search: "${queryParam}"` : 'All Products'}
-          </h1>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-            <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', margin: 0 }}>
-              Showing {products.length} of {totalProducts} products
-            </p>
-            {queryParam && (
-              <button
-                type="button"
-                onClick={handleClearSearch}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  fontSize: '0.75rem',
-                  fontWeight: 600,
-                  padding: '0.2rem 0.65rem',
-                  borderRadius: '9999px',
-                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                  color: '#f87171',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  cursor: 'pointer',
-                }}
-                title="Clear active search query"
-              >
-                Clear search ✕
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Sort Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <ArrowUpDown size={15} /> Sort by:
-          </span>
-          <select
-            value={sortParam}
-            onChange={(e) => handleSortChange(e.target.value)}
-            className="input-field"
-            style={{ padding: '0.45rem 0.85rem', width: 'auto', fontSize: '0.85rem', fontWeight: 600 }}
-          >
-            <option value="newest">Newest Arrivals</option>
-            <option value="price_asc">Price: Low to High</option>
-            <option value="price_desc">Price: High to Low</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Quick Category Chips Carousel */}
+      {/* 1. Sticky Top Category Box (Fixed directly below Header - 100% Full Width) */}
       {categoriesList.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflowX: 'auto', paddingBottom: '0.75rem', marginBottom: '1.5rem' }}>
-          <button
-            type="button"
-            onClick={() => handleSelectCategory(null)}
+        <div
+          ref={categoryBarRef}
+          style={{
+            position: 'sticky',
+            top: 'var(--site-header-height, 154px)',
+            zIndex: 80,
+            backgroundColor: '#ffffff',
+            width: '100%',
+            paddingTop: '0.5rem',
+            paddingBottom: '0.5rem',
+            marginBottom: '1.25rem',
+            borderBottom: '1px solid #e5e7eb',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.05)',
+            transition: 'box-shadow 0.15s ease',
+          }}
+        >
+          <div
+            className="container"
             style={{
-              padding: '0.45rem 1rem',
-              borderRadius: '9999px',
-              fontSize: '0.84rem',
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-              backgroundColor: !categoryIdParam ? 'var(--primary-600)' : '#f1f5f9',
-              color: !categoryIdParam ? '#ffffff' : 'var(--text-main)',
-              border: !categoryIdParam ? '1px solid var(--primary-600)' : '1px solid var(--border-color)',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
+              paddingLeft: '1.5rem',
+              paddingRight: '1.5rem',
             }}
           >
-            All Categories
-          </button>
-          {categoriesList.map((cat) => {
-            const isSelected = String(cat.id) === categoryIdParam;
-            return (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexWrap: 'wrap',
+                maxHeight: '92px',
+                overflowY: 'auto',
+                gap: '0.4rem',
+                padding: '0.15rem 0',
+              }}
+              className="vertical-scrollbar"
+            >
               <button
-                key={cat.id}
                 type="button"
-                onClick={() => handleSelectCategory(cat.id)}
+                onClick={() => handleSelectCategory(null)}
                 style={{
-                  padding: '0.45rem 1rem',
+                  padding: '0.38rem 0.85rem',
                   borderRadius: '9999px',
                   fontSize: '0.84rem',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   whiteSpace: 'nowrap',
-                  backgroundColor: isSelected ? 'var(--primary-600)' : '#f1f5f9',
-                  color: isSelected ? '#ffffff' : 'var(--text-main)',
-                  border: isSelected ? '1px solid var(--primary-600)' : '1px solid var(--border-color)',
+                  backgroundColor: !categoryIdParam ? '#113926' : '#f1f5f9',
+                  color: !categoryIdParam ? '#ffffff' : '#1f2937',
+                  border: !categoryIdParam ? '1px solid #113926' : '1px solid #e2e8f0',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
+                  boxShadow: !categoryIdParam ? '0 2px 8px rgba(17, 57, 38, 0.25)' : 'none',
+                }}
+                onMouseEnter={(e) => {
+                  if (categoryIdParam) e.currentTarget.style.backgroundColor = '#e2e8f0';
+                }}
+                onMouseLeave={(e) => {
+                  if (categoryIdParam) e.currentTarget.style.backgroundColor = '#f1f5f9';
                 }}
               >
-                {cat.name}
+                All Categories
               </button>
-            );
-          })}
+              {categoriesList.map((cat) => {
+                const isSelected = String(cat.id) === categoryIdParam;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => handleSelectCategory(cat.id)}
+                    style={{
+                      padding: '0.38rem 0.85rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.84rem',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                      backgroundColor: isSelected ? '#113926' : '#f1f5f9',
+                      color: isSelected ? '#ffffff' : '#1f2937',
+                      border: isSelected ? '1px solid #113926' : '1px solid #e2e8f0',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      boxShadow: isSelected ? '0 2px 8px rgba(17, 57, 38, 0.25)' : 'none',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = '#e2e8f0';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = '#f1f5f9';
+                    }}
+                  >
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Main Catalog Two-Column Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '2rem', alignItems: 'start' }} className="catalog-grid-layout">
-        {/* Left Column: Dynamic Database-driven Filter Sidebar with Category Browsing */}
-        <DynamicFilterSidebar
-          categoryId={categoryIdParam ? Number(categoryIdParam) : undefined}
-          onSelectCategory={handleSelectCategory}
-          selectedBrandId={selectedBrandId}
-          onSelectBrand={(id) => setSelectedBrandId(id)}
-          minPrice={minPrice}
-          maxPrice={maxPrice}
-          onPriceChange={(min, max) => { setMinPrice(min); setMaxPrice(max); }}
-          selectedAttrs={selectedAttrs}
-          onAttrChange={handleAttrChange}
-          onResetFilters={handleResetFilters}
-        />
+      {/* Main Catalog Content Container */}
+      <div className="container" style={{ paddingLeft: '1.5rem', paddingRight: '1.5rem' }}>
 
-        {/* Right Column: Product Grid & Active Filter Pills */}
-        <div>
-          {/* Active Filter Chips */}
-          {(selectedBrandId !== null || Object.keys(selectedAttrs).length > 0 || queryParam) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active filters:</span>
-              {queryParam && (
-                <span
-                  className="badge badge-primary"
-                  style={{ cursor: 'pointer', padding: '0.3rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                  onClick={handleClearSearch}
-                  title="Remove search query"
-                >
-                  Search: "{queryParam}" <X size={13} />
-                </span>
-              )}
-              {selectedBrandId && (
-                <span
-                  className="badge badge-primary"
-                  style={{ cursor: 'pointer', padding: '0.3rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                  onClick={() => setSelectedBrandId(null)}
-                >
-                  Brand <X size={13} />
-                </span>
-              )}
-              {Object.entries(selectedAttrs).map(([slug, val]) => (
-                <span
-                  key={slug}
-                  className="badge badge-primary"
-                  style={{ cursor: 'pointer', padding: '0.3rem 0.65rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-                  onClick={() => handleAttrChange(slug, null)}
-                >
-                  {slug}: {val} <X size={13} />
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={handleResetFilters}
+        {/* 2. Breadcrumb Bar (Below category box) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
+          <Link to="/" style={{ color: 'var(--primary-600)' }}>Home</Link>
+          <ChevronRight size={14} />
+          <Link to="/catalog" style={{ color: !categoryIdParam && !queryParam ? 'var(--text-main)' : 'inherit' }}>Catalog</Link>
+          {breadcrumbs.map((b, idx) => (
+            <React.Fragment key={b.id}>
+              <ChevronRight size={14} />
+              <Link
+                to={`/catalog?categoryId=${b.id}`}
                 style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#f87171',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  marginLeft: '0.5rem',
+                  color: idx === breadcrumbs.length - 1 ? 'var(--text-main)' : 'inherit',
+                  fontWeight: idx === breadcrumbs.length - 1 ? 600 : 400,
                 }}
               >
-                Reset all
-              </button>
-            </div>
-          )}
+                {b.name}
+              </Link>
+            </React.Fragment>
+          ))}
+        </div>
 
-          {isLoading ? (
+        {/* 3. Catalog Title & Sort Header (Below category box) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>
+              {currentCategory ? currentCategory.name : 'All Products'}
+            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+              <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', margin: 0 }}>
+                Showing {products.length} of {totalProducts} products
+              </p>
+            </div>
+          </div>
+
+          {/* Sort Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <ArrowUpDown size={15} /> Sort by:
+            </span>
+            <select
+              value={sortParam}
+              onChange={(e) => handleSortChange(e.target.value)}
+              className="input-field"
+              style={{ padding: '0.45rem 0.85rem', width: 'auto', fontSize: '0.85rem', fontWeight: 600 }}
+            >
+              <option value="newest">Newest Arrivals</option>
+              <option value="price_asc">Price: Low to High</option>
+              <option value="price_desc">Price: High to Low</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Products Grid (Full-Width Responsive Catalog) */}
+        <div style={{ width: '100%' }}>
+          {isInitialLoading ? (
             <div style={{ textAlign: 'center', padding: '5rem 0', color: 'var(--text-muted)' }}>
               Loading products...
             </div>
-          ) : products.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '5rem 2rem', backgroundColor: '#fff', borderRadius: '1rem', border: '1px solid var(--border-color)' }}>
-              <SlidersHorizontal size={40} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-              <h3 style={{ fontSize: '1.25rem', marginBottom: '0.5rem' }}>
-                {queryParam ? `No products found for "${queryParam}"` : 'No products match your filters'}
+          ) : products.length === 0 && !isFetching ? (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '4.5rem 2rem',
+                backgroundColor: '#ffffff',
+                borderRadius: '1rem',
+                border: '1.5px solid #e2e8f0',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)',
+              }}
+            >
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f1f5f9',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 1.25rem',
+                }}
+              >
+                <Search size={28} color="#94a3b8" />
+              </div>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1a3d2b', marginBottom: '0.5rem' }}>
+                {queryParam ? `No products found for "${queryParam}"` : 'No products found'}
               </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-                {queryParam ? 'Try searching with different keywords or reset your search to view all products.' : 'Try adjusting your price range or clearing attribute filters.'}
+              <p style={{ fontSize: '0.88rem', color: '#64748b', maxWidth: '420px', margin: '0 auto 1.5rem', lineHeight: 1.5 }}>
+                {queryParam
+                  ? `We couldn't find any products matching your search. Try checking for spelling errors or search with different keywords.`
+                  : 'There are currently no products available in this category.'}
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                 {queryParam && (
-                  <button onClick={handleClearSearch} className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                    Clear Search & View All Products
+                  <button
+                    type="button"
+                    onClick={handleClearSearch}
+                    className="btn-primary"
+                    style={{ padding: '0.65rem 1.4rem', fontSize: '0.88rem', fontWeight: 700 }}
+                  >
+                    View All Products
                   </button>
                 )}
-                <button onClick={handleResetFilters} className="btn-secondary" style={{ fontSize: '0.85rem' }}>
-                  Clear All Filters
-                </button>
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1.5rem' }}>
-              {products.map((prod) => (
-                <ProductCard key={prod.id} product={prod} />
-              ))}
+            <div style={{ position: 'relative', minHeight: '320px' }}>
+              {/* Sleek top indicator line while category data updates */}
+              {isFetching && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '-10px',
+                    left: 0,
+                    right: 0,
+                    height: '3px',
+                    backgroundColor: '#f1f5f9',
+                    borderRadius: '9999px',
+                    overflow: 'hidden',
+                    zIndex: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      backgroundColor: '#113926',
+                      width: '45%',
+                      borderRadius: '9999px',
+                      animation: 'catalog-shimmer 0.85s infinite ease-in-out',
+                    }}
+                  />
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '1.5rem',
+                  opacity: isFetching ? 0.45 : 1,
+                  transition: 'opacity 0.15s ease',
+                  pointerEvents: isFetching ? 'none' : 'auto',
+                }}
+              >
+                {products.map((prod) => (
+                  <ProductCard key={prod.id} product={prod} />
+                ))}
+              </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', marginTop: '3rem' }}>
+                  <button
+                    type="button"
+                    disabled={pageParam <= 1}
+                    onClick={() => {
+                      const p = new URLSearchParams(searchParams);
+                      p.set('page', String(pageParam - 1));
+                      setSearchParams(p);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid #e2e8f0',
+                      backgroundColor: pageParam <= 1 ? '#f8fafc' : '#ffffff',
+                      color: pageParam <= 1 ? '#94a3b8' : '#1e293b',
+                      cursor: pageParam <= 1 ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.88rem',
+                    }}
+                  >
+                    Previous
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                    <button
+                      key={pg}
+                      type="button"
+                      onClick={() => {
+                        const p = new URLSearchParams(searchParams);
+                        p.set('page', String(pg));
+                        setSearchParams(p);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '0.5rem',
+                        border: pg === pageParam ? '1px solid #113926' : '1px solid #e2e8f0',
+                        backgroundColor: pg === pageParam ? '#113926' : '#ffffff',
+                        color: pg === pageParam ? '#ffffff' : '#1e293b',
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {pg}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    disabled={pageParam >= totalPages}
+                    onClick={() => {
+                      const p = new URLSearchParams(searchParams);
+                      p.set('page', String(pageParam + 1));
+                      setSearchParams(p);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.5rem',
+                      border: '1px solid #e2e8f0',
+                      backgroundColor: pageParam >= totalPages ? '#f8fafc' : '#ffffff',
+                      color: pageParam >= totalPages ? '#94a3b8' : '#1e293b',
+                      cursor: pageParam >= totalPages ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.88rem',
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
       <style>{`
-        @media (max-width: 900px) {
-          .catalog-grid-layout { grid-template-columns: 1fr !important; }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .vertical-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .vertical-scrollbar::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 9999px;
+        }
+        .vertical-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 9999px;
+        }
+        .vertical-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+        @keyframes catalog-shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(320%); }
         }
       `}</style>
     </div>

@@ -10,13 +10,28 @@ import {
   X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { Brand } from '../types';
+import { Brand, PaginationMeta } from '../types';
 import { ImageUploadField } from '../components/ImageUploadField';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { AdminModal } from '../components/AdminModal';
 
 export const BrandsPage: React.FC = () => {
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [statusFilter, setStatusFilter] = useState('ALL');
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -36,8 +51,18 @@ export const BrandsPage: React.FC = () => {
   const fetchBrands = async () => {
     try {
       setLoading(true);
-      const res: any = await adminApi.get('/brands');
-      setBrands(res.data || res || []);
+      const params = new URLSearchParams();
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (statusFilter !== 'ALL') params.append('status', statusFilter);
+
+      const res: any = await adminApi.get(`/brands?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setBrands(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load brands:', err);
     } finally {
@@ -46,8 +71,12 @@ export const BrandsPage: React.FC = () => {
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter]);
+
+  useEffect(() => {
     fetchBrands();
-  }, []);
+  }, [page, limit, debouncedSearch, statusFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,11 +120,7 @@ export const BrandsPage: React.FC = () => {
     }
   };
 
-  const filteredBrands = brands.filter(
-    (b) =>
-      b.name.toLowerCase().includes(search.toLowerCase()) ||
-      b.brandCode.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredBrands = Array.isArray(brands) ? brands : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -129,14 +154,15 @@ export const BrandsPage: React.FC = () => {
       </div>
 
       {/* Filter / Search Bar */}
-      <div className="glass-card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <div style={{ position: 'relative', width: '100%' }}>
+      <div className="glass-card" style={{ padding: '1rem', display: 'flex', flexDirection: 'row', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        {/* Search */}
+        <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
           <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
             type="text"
             className="form-input"
             style={{ paddingLeft: '2.5rem', paddingRight: search ? '2.2rem' : '0.9rem' }}
-            placeholder="Search by brand name or brand code..."
+            placeholder="Search brands by name, brand code, or description..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -165,9 +191,25 @@ export const BrandsPage: React.FC = () => {
           )}
         </div>
 
-        {search && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active filter:</span>
+        {/* Status Filter */}
+        <div style={{ width: '160px' }}>
+          <select
+            className="form-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Active Filter Badges */}
+      {(search || statusFilter !== 'ALL') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active filters:</span>
+          {search && (
             <span
               className="badge badge-primary"
               style={{ cursor: 'pointer', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
@@ -175,9 +217,37 @@ export const BrandsPage: React.FC = () => {
             >
               Search: "{search}" <X size={13} />
             </span>
-          </div>
-        )}
-      </div>
+          )}
+          {statusFilter !== 'ALL' && (
+            <span
+              className="badge badge-primary"
+              style={{ cursor: 'pointer', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              onClick={() => setStatusFilter('ALL')}
+            >
+              Status: {statusFilter} <X size={13} />
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setStatusFilter('ALL');
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#f87171',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              marginLeft: '0.5rem',
+            }}
+          >
+            Reset all
+          </button>
+        </div>
+      )}
 
       {/* Brands Table */}
       <div className="glass-card" style={{ padding: '1.5rem', overflow: 'hidden' }}>
@@ -312,217 +382,195 @@ export const BrandsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          pagination={pagination}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+          loading={loading}
+        />
       </div>
 
       {/* Create Modal */}
-      {isCreateModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '28rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Add Brand
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Brand Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.name}
-                  onChange={(e) => {
-                    const name = e.target.value;
-                    const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'BRD';
-                    const currentCode = formData.brandCode;
-                    const suffix = currentCode.split('-').pop() || String(Math.floor(1000 + Math.random() * 9000));
-                    setFormData({
-                      ...formData,
-                      name,
-                      brandCode: `BRD-${prefix}-${suffix}`,
-                      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                    });
-                  }}
-                  placeholder="e.g. Apple, Samsung"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Brand Code <span style={{ fontSize: '0.68rem', color: '#2563eb', fontWeight: 600, marginLeft: '0.35rem' }}>(Auto-generated, Immutable)</span>
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  readOnly
-                  className="form-input"
-                  style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#334155', fontWeight: 700 }}
-                  value={formData.brandCode}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Slug
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.slug}
-                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                />
-              </div>
-
-              {/* Brand Logo Upload Field */}
-              <ImageUploadField
-                label="Brand Logo"
-                description="Upload official brand logo or select from server uploads/ folder"
-                value={formData.logo}
-                onChange={(url) => setFormData({ ...formData, logo: url })}
-                multiple={false}
-              />
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Description
-                </label>
-                <textarea
-                  className="form-input"
-                  style={{ height: '3.5rem', resize: 'none' }}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Brand
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Add Brand"
+        subtitle="Register a new brand manufacturer in the catalog"
+        maxWidth="30rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Brand Name *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.name}
+              onChange={(e) => {
+                const name = e.target.value;
+                const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'BRD';
+                const currentCode = formData.brandCode;
+                const suffix = currentCode.split('-').pop() || String(Math.floor(1000 + Math.random() * 9000));
+                setFormData({
+                  ...formData,
+                  name,
+                  brandCode: `BRD-${prefix}-${suffix}`,
+                  slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                });
+              }}
+              placeholder="e.g. Apple, Samsung"
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Brand Code <span style={{ fontSize: '0.68rem', color: '#2563eb', fontWeight: 600, marginLeft: '0.35rem' }}>(Auto-generated)</span>
+            </label>
+            <input
+              type="text"
+              disabled
+              readOnly
+              className="form-input"
+              style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#334155', fontWeight: 700 }}
+              value={formData.brandCode}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Slug
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.slug}
+              onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+            />
+          </div>
+
+          {/* Brand Logo Upload Field */}
+          <ImageUploadField
+            label="Brand Logo"
+            description="Upload official brand logo or select from server uploads/ folder"
+            value={formData.logo}
+            onChange={(url) => setFormData({ ...formData, logo: url })}
+            multiple={false}
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Description
+            </label>
+            <textarea
+              className="form-input"
+              style={{ height: '3.5rem', resize: 'none' }}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Brand
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Edit Modal */}
-      {isEditModalOpen && selectedBrand && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '28rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Edit Brand: {selectedBrand.name}
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Brand Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Slug
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.slug}
-                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                />
-              </div>
-
-              {/* Brand Logo Upload Field */}
-              <ImageUploadField
-                label="Brand Logo"
-                description="Upload official brand logo or select from server uploads/ folder"
-                value={formData.logo}
-                onChange={(url) => setFormData({ ...formData, logo: url })}
-                multiple={false}
-              />
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Description
-                </label>
-                <textarea
-                  className="form-input"
-                  style={{ height: '3.5rem', resize: 'none' }}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditModalOpen && !!selectedBrand}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Edit Brand: ${selectedBrand?.name || ''}`}
+        subtitle={`Brand Code: ${selectedBrand?.brandCode || ''}`}
+        maxWidth="30rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Brand Name
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Slug
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.slug}
+              onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+            />
+          </div>
+
+          {/* Brand Logo Upload Field */}
+          <ImageUploadField
+            label="Brand Logo"
+            description="Upload official brand logo or select from server uploads/ folder"
+            value={formData.logo}
+            onChange={(url) => setFormData({ ...formData, logo: url })}
+            multiple={false}
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Description
+            </label>
+            <textarea
+              className="form-input"
+              style={{ height: '3.5rem', resize: 'none' }}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };

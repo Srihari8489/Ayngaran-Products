@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -42,8 +43,8 @@ export class CategoriesController {
   }
 
   @Get()
-  async findAll() {
-    return this.categoriesService.findAll();
+  async findAll(@Query() query?: any) {
+    return this.categoriesService.findAll(query);
   }
 
   @Get(':id')

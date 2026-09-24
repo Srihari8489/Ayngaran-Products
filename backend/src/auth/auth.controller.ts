@@ -3,10 +3,16 @@ import {
   Post,
   Body,
   Get,
+  Patch,
+  Put,
+  Param,
+  Delete,
+  ParseIntPipe,
   UseGuards,
   Req,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
@@ -26,16 +32,28 @@ export class AuthController {
   // CUSTOMER ENDPOINTS
   // -------------------------------------------------------------
 
+  @Post('customer/send-otp')
+  @HttpCode(HttpStatus.OK)
+  async sendCustomerOtp(@Body() dto: RequestOtpDto) {
+    const target = dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Phone number is required');
+    return this.authService.requestCustomerOtp(target);
+  }
+
   @Post('customer/request-otp')
   @HttpCode(HttpStatus.OK)
   async requestCustomerOtp(@Body() dto: RequestOtpDto) {
-    return this.authService.requestCustomerOtp(dto.identifier);
+    const target = dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Phone number is required');
+    return this.authService.requestCustomerOtp(target);
   }
 
   @Post('customer/verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyCustomerOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyCustomerOtp(dto.identifier, dto.otp);
+    const target = dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Phone number is required');
+    return this.authService.verifyCustomerOtp(target, dto.otp, dto.name);
   }
 
   @Post('customer/refresh-token')
@@ -47,14 +65,86 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('customer/profile')
   async getCustomerProfile(@CurrentUser() user: any) {
+    const addresses = await this.authService.getCustomerAddresses(user.id);
     return {
       id: user.id,
       userCode: user.userCode,
       name: user.name,
       email: user.email,
       phone: user.phone,
-      addresses: user.addresses,
+      addresses,
     };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('customer/profile')
+  @HttpCode(HttpStatus.OK)
+  async updateCustomerProfile(
+    @CurrentUser() user: any,
+    @Body() body: { name?: string; email?: string },
+  ) {
+    return this.authService.updateCustomerProfile(user.id, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('customer/profile')
+  @HttpCode(HttpStatus.OK)
+  async putCustomerProfile(
+    @CurrentUser() user: any,
+    @Body() body: { name?: string; email?: string },
+  ) {
+    return this.authService.updateCustomerProfile(user.id, body);
+  }
+
+  // -------------------------------------------------------------
+  // CUSTOMER ADDRESS ENDPOINTS
+  // -------------------------------------------------------------
+
+  @UseGuards(JwtAuthGuard)
+  @Get('customer/addresses')
+  async getCustomerAddresses(@CurrentUser() user: any) {
+    return this.authService.getCustomerAddresses(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('customer/addresses')
+  @HttpCode(HttpStatus.OK)
+  async addCustomerAddress(
+    @CurrentUser() user: any,
+    @Body() body: any,
+  ) {
+    return this.authService.addCustomerAddress(user.id, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('customer/addresses/:id')
+  @HttpCode(HttpStatus.OK)
+  async updateCustomerAddress(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: any,
+  ) {
+    return this.authService.updateCustomerAddress(user.id, id, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('customer/addresses/:id/set-default')
+  @HttpCode(HttpStatus.OK)
+  async setDefaultAddress(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.authService.setDefaultAddress(user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('customer/addresses/:id')
+  @HttpCode(HttpStatus.OK)
+  async deleteCustomerAddress(
+    @CurrentUser() user: any,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.authService.deleteCustomerAddress(user.id, id);
   }
 
   // -------------------------------------------------------------

@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -96,5 +97,13 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateVariantInputDto)
   variants?: UpdateVariantInputDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  useCategoryGst?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  gstRate?: number;
 }
 

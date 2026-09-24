@@ -13,9 +13,13 @@ import { OrdersPage } from './pages/OrdersPage';
 import { DeliveryPartnersPage } from './pages/DeliveryPartnersPage';
 import { GatewaysPage } from './pages/GatewaysPage';
 import { ReviewsPage } from './pages/ReviewsPage';
+import { FeedbacksPage } from './pages/FeedbacksPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { StaffPage } from './pages/StaffPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
+import { InquiriesPage } from './pages/InquiriesPage';
+import { SubscribersPage } from './pages/SubscribersPage';
+import { UsersPage } from './pages/UsersPage';
 
 // Protected Route Guard
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -60,6 +64,10 @@ export const App: React.FC = () => {
             <Route path="products" element={<ProductsPage />} />
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="orders" element={<OrdersPage />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="inquiries" element={<InquiriesPage />} />
+            <Route path="feedbacks" element={<FeedbacksPage />} />
+            <Route path="subscribers" element={<SubscribersPage />} />
             <Route path="delivery-partners" element={<DeliveryPartnersPage />} />
             <Route path="gateways" element={<GatewaysPage />} />
             <Route path="reviews" element={<ReviewsPage />} />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Smartphone, ArrowRight, RefreshCw, KeyRound, CheckCircle2 } from 'lucide-react';
+import { X, Smartphone, ArrowRight, RefreshCw, KeyRound, CheckCircle2, MessageSquare, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface OtpLoginModalProps {
@@ -19,12 +19,13 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
   const onClose = propOnClose || closeLoginModal;
 
   const [step, setStep] = useState<'REQUEST' | 'VERIFY'>('REQUEST');
-  const [identifier, setIdentifier] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [demoWhatsAppUrl, setDemoWhatsAppUrl] = useState<string | null>(null);
 
   // Countdown timer for 60s cooldown limit
   useEffect(() => {
@@ -35,21 +36,45 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
     return () => clearInterval(timer);
   }, [cooldown]);
 
+  // Reset state whenever modal is closed
+  useEffect(() => {
+    if (!isOpen) {
+      setStep('REQUEST');
+      setName('');
+      setPhone('');
+      setOtp('');
+      setErrorMessage('');
+      setDemoWhatsAppUrl(null);
+      setCooldown(0);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identifier.trim()) return;
+    if (!name.trim()) {
+      setErrorMessage('Please enter your full name.');
+      return;
+    }
+    if (!phone.trim() || phone.replace(/\D/g, '').length < 10) {
+      setErrorMessage('Please enter a valid 10-digit phone number.');
+      return;
+    }
 
     try {
       setIsLoading(true);
       setErrorMessage('');
-      const res = await requestOtp(identifier.trim());
+      const res = await requestOtp(phone.trim(), name.trim());
       setStep('VERIFY');
       setCooldown(60);
-      if (res.devOtp) setDevOtp(res.devOtp);
+
+      if (res?.demoWhatsAppUrl) {
+        setDemoWhatsAppUrl(res.demoWhatsAppUrl);
+        window.open(res.demoWhatsAppUrl, '_blank');
+      }
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to send OTP.');
     } finally {
       setIsLoading(false);
     }
@@ -65,11 +90,11 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
     try {
       setIsLoading(true);
       setErrorMessage('');
-      await verifyOtp(identifier.trim(), otp);
+      await verifyOtp(phone.trim(), otp, name.trim());
       onClose();
       if (onSuccess) onSuccess();
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to verify OTP.');
     } finally {
       setIsLoading(false);
     }
@@ -80,11 +105,15 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
     try {
       setIsLoading(true);
       setErrorMessage('');
-      const res = await requestOtp(identifier.trim());
+      const res = await requestOtp(phone.trim(), name.trim());
       setCooldown(60);
-      if (res.devOtp) setDevOtp(res.devOtp);
+
+      if (res?.demoWhatsAppUrl) {
+        setDemoWhatsAppUrl(res.demoWhatsAppUrl);
+        window.open(res.demoWhatsAppUrl, '_blank');
+      }
     } catch (err: any) {
-      setErrorMessage(err.message);
+      setErrorMessage(err.message || 'Failed to resend OTP.');
     } finally {
       setIsLoading(false);
     }
@@ -100,7 +129,7 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 100,
+        zIndex: 100000,
         padding: '1rem',
         animation: 'fadeIn 0.2s ease',
       }}
@@ -115,6 +144,7 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
           padding: '2rem',
           position: 'relative',
           boxShadow: 'var(--shadow-xl)',
+          backgroundColor: '#ffffff',
         }}
       >
         <button
@@ -126,50 +156,118 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
             color: 'var(--text-muted)',
             padding: '0.4rem',
             borderRadius: '9999px',
+            background: '#f1f5f9',
+            border: 'none',
+            cursor: 'pointer',
           }}
         >
-          <X size={20} />
+          <X size={18} />
         </button>
 
         {step === 'REQUEST' ? (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-              <div style={{ padding: '0.65rem', borderRadius: '0.65rem', background: 'var(--primary-50)', color: 'var(--primary-600)' }}>
-                <Smartphone size={24} />
+              <div style={{ padding: '0.65rem', borderRadius: '0.65rem', background: '#25D366', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <MessageSquare size={24} />
               </div>
               <div>
-                <h3 style={{ fontSize: '1.25rem' }}>Login to Ayngaran</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Passwordless instant OTP login</p>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1a3d2b' }}>Login via WhatsApp</h3>
+                <p style={{ fontSize: '0.82rem', color: '#64748b' }}>Fast & secure WhatsApp OTP verification</p>
               </div>
             </div>
 
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.5rem', padding: '0.5rem 0.75rem', fontSize: '0.75rem', color: '#166534', fontWeight: 700, margin: '1rem 0' }}>
+              ⚡ DEMO MODE: Clicking continue opens WhatsApp with your pre-filled verification code.
+            </div>
+
             {errorMessage && (
-              <div className="badge-danger" style={{ padding: '0.6rem 0.85rem', borderRadius: '0.5rem', width: '100%', margin: '1rem 0', fontSize: '0.85rem' }}>
+              <div style={{ padding: '0.6rem 0.85rem', borderRadius: '0.5rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: '0.85rem', marginBottom: '1rem' }}>
                 {errorMessage}
               </div>
             )}
 
-            <form onSubmit={handleRequestOtp} style={{ marginTop: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
-                Mobile Number or Email
-              </label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="e.g. 9876543210 or customer@ayngaran.com"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                required
-                autoFocus
-              />
+            <form onSubmit={handleRequestOtp} style={{ marginTop: '1rem' }}>
+              {/* Full Name Field */}
+              <div style={{ marginBottom: '0.85rem' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Your Full Name
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <User size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Enter your name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem 0.9rem 0.7rem 2.4rem',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      borderRadius: '0.625rem',
+                      border: '1.5px solid #cbd5e1',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Phone Number Field */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  WhatsApp Phone Number
+                </label>
+
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <div style={{ padding: '0.7rem 0.85rem', background: '#f8fafc', border: '1.5px solid #cbd5e1', borderRadius: '0.625rem', fontWeight: 700, fontSize: '0.9rem', color: '#334155' }}>
+                    +91
+                  </div>
+                  <input
+                    type="tel"
+                    className="input-field"
+                    placeholder="9876543210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                    required
+                    maxLength={10}
+                    style={{
+                      flex: 1,
+                      padding: '0.7rem 0.9rem',
+                      fontSize: '1rem',
+                      fontWeight: 700,
+                      borderRadius: '0.625rem',
+                      border: '1.5px solid #cbd5e1',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </div>
 
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || !phone.trim() || !name.trim()}
                 className="btn-primary"
-                style={{ width: '100%', marginTop: '1.25rem', padding: '0.75rem' }}
+                style={{
+                  width: '100%',
+                  padding: '0.85rem',
+                  borderRadius: '0.625rem',
+                  background: 'linear-gradient(135deg, #1a3d2b, #2d6a4f)',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '0.95rem',
+                  border: 'none',
+                  cursor: isLoading || !phone.trim() || !name.trim() ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 4px 14px rgba(26,61,43,0.25)',
+                }}
               >
-                <span>{isLoading ? 'Generating OTP...' : 'Send Verification Code'}</span>
+                <span>{isLoading ? 'Generating OTP...' : 'Continue with WhatsApp OTP'}</span>
                 <ArrowRight size={18} />
               </button>
             </form>
@@ -177,47 +275,69 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
         ) : (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-              <div style={{ padding: '0.65rem', borderRadius: '0.65rem', background: 'var(--success-bg)', color: 'var(--success)' }}>
+              <div style={{ padding: '0.65rem', borderRadius: '0.65rem', background: '#25D366', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <KeyRound size={24} />
               </div>
               <div>
-                <h3 style={{ fontSize: '1.25rem' }}>Verify OTP</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Code sent to {identifier}</p>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1a3d2b' }}>Verify WhatsApp OTP</h3>
+                <p style={{ fontSize: '0.82rem', color: '#16a34a', fontWeight: 700 }}>OTP sent via WhatsApp Demo</p>
               </div>
             </div>
 
-            {/* Sandbox Quick Testing Helper */}
-            {devOtp && (
-              <div
-                onClick={() => setOtp(devOtp)}
+            <div style={{ padding: '0.6rem 0.85rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.625rem', fontSize: '0.85rem', color: '#334155', margin: '0.85rem 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span>Account Name:</span>
+                <strong style={{ color: '#1a3d2b' }}>{name}</strong>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Target Phone:</span>
+                <strong style={{ fontFamily: 'monospace', fontSize: '0.95rem', color: '#1a3d2b' }}>
+                  +91 {phone.length >= 10 ? `${phone.slice(0, 2)}XXXXXX${phone.slice(-2)}` : phone}
+                </strong>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setStep('REQUEST'); setOtp(''); setErrorMessage(''); }}
+              style={{ background: 'none', border: 'none', color: '#2d6a4f', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', padding: 0, marginBottom: '0.75rem', textDecoration: 'underline' }}
+            >
+              ← Change name or phone number
+            </button>
+
+            {demoWhatsAppUrl && (
+              <button
+                type="button"
+                onClick={() => window.open(demoWhatsAppUrl, '_blank')}
                 style={{
-                  background: '#f0fdf4',
-                  border: '1px dashed #86efac',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: '0.65rem',
-                  margin: '1rem 0',
+                  width: '100%',
+                  padding: '0.5rem',
+                  borderRadius: '0.5rem',
+                  background: '#dcfce7',
+                  border: '1px solid #86efac',
+                  color: '#15803d',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
                   cursor: 'pointer',
+                  marginBottom: '1rem',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'space-between',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
                 }}
               >
-                <div>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#166534', display: 'block' }}>DEV SANDBOX CODE:</span>
-                  <span style={{ fontSize: '1.1rem', fontWeight: 800, letterSpacing: '0.2em', color: '#15803d' }}>{devOtp}</span>
-                </div>
-                <span style={{ fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>Click to fill ↵</span>
-              </div>
+                <MessageSquare size={14} /> Open WhatsApp Demo Link Again
+              </button>
             )}
 
             {errorMessage && (
-              <div className="badge-danger" style={{ padding: '0.6rem 0.85rem', borderRadius: '0.5rem', width: '100%', margin: '1rem 0', fontSize: '0.85rem' }}>
+              <div style={{ padding: '0.6rem 0.85rem', borderRadius: '0.5rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: '0.85rem', marginBottom: '1rem' }}>
                 {errorMessage}
               </div>
             )}
 
-            <form onSubmit={handleVerifyOtp} style={{ marginTop: '1rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+            <form onSubmit={handleVerifyOtp} style={{ marginTop: '0.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#475569', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Enter 6-Digit OTP
               </label>
               <input
@@ -228,7 +348,17 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                 required
-                style={{ textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.3em', fontWeight: 700 }}
+                style={{
+                  width: '100%',
+                  textAlign: 'center',
+                  fontSize: '1.6rem',
+                  letterSpacing: '0.35em',
+                  fontWeight: 800,
+                  padding: '0.75rem',
+                  borderRadius: '0.625rem',
+                  border: '2px solid #2d6a4f',
+                  outline: 'none',
+                }}
                 autoFocus
               />
 
@@ -236,7 +366,24 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
                 type="submit"
                 disabled={isLoading || otp.length !== 6}
                 className="btn-primary"
-                style={{ width: '100%', marginTop: '1.25rem', padding: '0.75rem' }}
+                style={{
+                  width: '100%',
+                  marginTop: '1.25rem',
+                  padding: '0.85rem',
+                  borderRadius: '0.625rem',
+                  background: 'linear-gradient(135deg, #1a3d2b, #2d6a4f)',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '0.95rem',
+                  border: 'none',
+                  cursor: isLoading || otp.length !== 6 ? 'not-allowed' : 'pointer',
+                  opacity: isLoading || otp.length !== 6 ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 4px 14px rgba(26,61,43,0.25)',
+                }}
               >
                 <span>{isLoading ? 'Verifying...' : 'Verify & Login'}</span>
                 <CheckCircle2 size={18} />
@@ -246,18 +393,18 @@ export const OtpLoginModal: React.FC<OtpLoginModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setStep('REQUEST')}
-                  style={{ color: 'var(--text-muted)' }}
+                  style={{ color: '#64748b', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
                 >
                   Change number
                 </button>
 
                 {cooldown > 0 ? (
-                  <span style={{ color: 'var(--text-muted)' }}>Resend in {cooldown}s</span>
+                  <span style={{ color: '#94a3b8', fontWeight: 600 }}>Resend OTP in {cooldown}s</span>
                 ) : (
                   <button
                     type="button"
                     onClick={handleResendOtp}
-                    style={{ color: 'var(--primary-600)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                    style={{ color: '#2d6a4f', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.25rem', background: 'none', border: 'none', cursor: 'pointer' }}
                   >
                     <RefreshCw size={14} />
                     <span>Resend OTP</span>

@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -24,8 +25,8 @@ export class StaffController {
 
   @RequirePermissions('STAFF_MANAGE')
   @Get()
-  async findAll() {
-    return this.staffService.findAll();
+  async findAll(@Query() query?: any) {
+    return this.staffService.findAll(query);
   }
 
   @RequirePermissions('STAFF_MANAGE')

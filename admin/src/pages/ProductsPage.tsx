@@ -18,16 +18,32 @@ import {
   X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { Product, Category, Brand } from '../types';
+import { Product, Category, Brand, PaginationMeta } from '../types';
 import { ImageUploadField } from '../components/ImageUploadField';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { DynamicGstSelect } from '../components/DynamicGstSelect';
 
 export const ProductsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('ALL');
   const [categories, setFlatCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('');
+
 
   // Creation Wizard States
   const [isWizardOpen, setIsWizardOpen] = useState(false);
@@ -57,6 +73,8 @@ export const ProductsPage: React.FC = () => {
     brandId: '',
     basePrice: '',
     minStockAlert: '5',
+    useCategoryGst: true,
+    gstRate: '5',
     status: 'ACTIVE',
   });
   const [editImages, setEditImages] = useState<string[]>([]);
@@ -77,6 +95,8 @@ export const ProductsPage: React.FC = () => {
     brandId: '',
     basePrice: '',
     minStockAlert: '5',
+    useCategoryGst: true,
+    gstRate: '5',
     status: 'ACTIVE',
   });
 
@@ -105,21 +125,13 @@ export const ProductsPage: React.FC = () => {
     { url: '', isPrimary: true },
   ]);
 
-  const fetchData = async () => {
+  // Fetch categories and brands for filters & form creation
+  const fetchMeta = async () => {
     try {
-      setLoading(true);
-      const [prodRes, catRes, brandRes]: any = await Promise.all([
-        adminApi.get('/products?limit=50'),
+      const [catRes, brandRes]: any = await Promise.all([
         adminApi.get('/categories'),
         adminApi.get('/brands'),
       ]);
-
-      const items =
-        prodRes?.data?.items ||
-        prodRes?.items ||
-        (Array.isArray(prodRes?.data) ? prodRes.data : []) ||
-        (Array.isArray(prodRes) ? prodRes : []);
-      setProducts(Array.isArray(items) ? items : []);
       const catList = Array.isArray(catRes?.data)
         ? catRes.data
         : Array.isArray(catRes)
@@ -137,6 +149,32 @@ export const ProductsPage: React.FC = () => {
       setFlatCategories(catList);
       setBrands(brandList);
     } catch (err) {
+      console.error('Failed to load category/brand metadata:', err);
+    }
+  };
+
+  // Fetch products with server-side pagination, search, and filters
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (selectedCategoryFilter) params.append('categoryId', selectedCategoryFilter);
+      if (selectedStatusFilter && selectedStatusFilter !== 'ALL') {
+        params.append('status', selectedStatusFilter);
+      } else if (selectedStatusFilter === 'ALL') {
+        params.append('status', 'ALL');
+      }
+
+      const res: any = await adminApi.get(`/products?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setProducts(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
+    } catch (err) {
       console.error('Failed to load products data:', err);
     } finally {
       setLoading(false);
@@ -144,8 +182,18 @@ export const ProductsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    fetchMeta();
   }, []);
+
+  // Reset page to 1 when filters or search change
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, selectedCategoryFilter, selectedStatusFilter]);
+
+  // Trigger query whenever page, limit, or filters change
+  useEffect(() => {
+    fetchProducts();
+  }, [page, limit, debouncedSearch, selectedCategoryFilter, selectedStatusFilter]);
 
   // When category changes in Step 1, load its dynamic inherited attributes
   const handleCategoryChange = async (catId: string) => {
@@ -197,6 +245,8 @@ export const ProductsPage: React.FC = () => {
       brandId: brands.length > 0 ? String(brands[0].id) : '',
       basePrice: '999',
       minStockAlert: '5',
+      useCategoryGst: true,
+      gstRate: '5',
       status: 'ACTIVE',
     });
     setVariantsList([
@@ -296,6 +346,8 @@ export const ProductsPage: React.FC = () => {
         brandId: Number(baseForm.brandId),
         basePrice: Number(baseForm.basePrice),
         minStockAlert: Number(baseForm.minStockAlert),
+        useCategoryGst: baseForm.useCategoryGst !== false,
+        gstRate: !baseForm.useCategoryGst && baseForm.gstRate ? Number(baseForm.gstRate) : null,
         status: baseForm.status,
         attributes: formattedAttributes,
         variants: formattedVariants,
@@ -304,7 +356,7 @@ export const ProductsPage: React.FC = () => {
 
       await adminApi.post('/products', payload);
       setIsWizardOpen(false);
-      fetchData();
+      fetchProducts();
     } catch (err: any) {
       setFormError(err.response?.data?.message || 'Failed to create product. Check codes or required specifications.');
     } finally {
@@ -329,6 +381,8 @@ export const ProductsPage: React.FC = () => {
       brandId: brId ? String(brId) : '',
       basePrice: p.basePrice ? String(p.basePrice) : '',
       minStockAlert: String(p.minStockAlert ?? 5),
+      useCategoryGst: p.useCategoryGst !== false,
+      gstRate: p.gstRate !== null && p.gstRate !== undefined ? String(p.gstRate) : '5',
       status: p.status || 'ACTIVE',
     });
     setEditImages(p.images?.map((img) => img.url) || []);
@@ -475,6 +529,8 @@ export const ProductsPage: React.FC = () => {
         brandId: editForm.brandId ? Number(editForm.brandId) : undefined,
         basePrice: editForm.basePrice ? Number(editForm.basePrice) : undefined,
         minStockAlert: editForm.minStockAlert ? Number(editForm.minStockAlert) : undefined,
+        useCategoryGst: editForm.useCategoryGst !== false,
+        gstRate: !editForm.useCategoryGst && editForm.gstRate ? Number(editForm.gstRate) : null,
         status: editForm.status,
         images: editImages
           .filter((url) => url && url.trim().length > 0)
@@ -489,7 +545,7 @@ export const ProductsPage: React.FC = () => {
 
       await adminApi.patch(`/products/${editingProduct.id}`, payload);
       setIsEditModalOpen(false);
-      fetchData();
+      fetchProducts();
     } catch (err: any) {
       setEditError(err.response?.data?.message || 'Failed to update product');
     } finally {
@@ -501,22 +557,13 @@ export const ProductsPage: React.FC = () => {
     if (!window.confirm(`Are you sure you want to delete "${product.name}"?`)) return;
     try {
       await adminApi.delete(`/products/${product.id}`);
-      fetchData();
+      fetchProducts();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to delete product');
     }
   };
 
-  const productList = Array.isArray(products) ? products : [];
-  const filteredProducts = productList.filter((p) => {
-    const matchesSearch =
-      (p.name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.productCode || '').toLowerCase().includes(search.toLowerCase()) ||
-      (p.brand && (p.brand.name || '').toLowerCase().includes(search.toLowerCase()));
-    const matchesCategory =
-      !selectedCategoryFilter || String(p.categoryId) === selectedCategoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  const filteredProducts = Array.isArray(products) ? products : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -572,7 +619,7 @@ export const ProductsPage: React.FC = () => {
           )}
         </div>
 
-        <div style={{ width: '220px' }}>
+        <div style={{ width: '200px' }}>
           <select
             className="form-select"
             value={selectedCategoryFilter}
@@ -586,10 +633,22 @@ export const ProductsPage: React.FC = () => {
             ))}
           </select>
         </div>
+
+        <div style={{ width: '150px' }}>
+          <select
+            className="form-select"
+            value={selectedStatusFilter}
+            onChange={(e) => setSelectedStatusFilter(e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        </div>
       </div>
 
       {/* Active Filters Bar */}
-      {(search || selectedCategoryFilter) && (
+      {(search || selectedCategoryFilter || selectedStatusFilter !== 'ALL') && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active filters:</span>
           {search && (
@@ -612,11 +671,22 @@ export const ProductsPage: React.FC = () => {
               Category: {categories.find((c) => String(c.id) === selectedCategoryFilter)?.name || selectedCategoryFilter} <X size={13} />
             </span>
           )}
+          {selectedStatusFilter !== 'ALL' && (
+            <span
+              className="badge badge-primary"
+              style={{ cursor: 'pointer', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+              onClick={() => setSelectedStatusFilter('ALL')}
+              title="Clear status filter"
+            >
+              Status: {selectedStatusFilter} <X size={13} />
+            </span>
+          )}
           <button
             type="button"
             onClick={() => {
               setSearch('');
               setSelectedCategoryFilter('');
+              setSelectedStatusFilter('ALL');
             }}
             style={{
               background: 'none',
@@ -644,6 +714,7 @@ export const ProductsPage: React.FC = () => {
                 <th>Category</th>
                 <th>Brand</th>
                 <th>Base Price</th>
+                <th>GST Rate</th>
                 <th>Stock / Alert</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -652,13 +723,13 @@ export const ProductsPage: React.FC = () => {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                     Loading product catalog...
                   </td>
                 </tr>
               ) : filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '3rem 1rem' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem' }}>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '0.75rem' }}>
                       No products found matching filters.
                     </p>
@@ -731,6 +802,47 @@ export const ProductsPage: React.FC = () => {
                         </span>
                       </td>
                       <td>
+                        {p.useCategoryGst !== false ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.22rem 0.6rem',
+                              borderRadius: '0.375rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              backgroundColor: '#ecfdf5',
+                              color: '#065f46',
+                              border: '1px solid #a7f3d0',
+                            }}
+                            title={`Inherited from Category (${p.category?.name || 'Category Default'})`}
+                          >
+                            <span>GST {p.effectiveGstRate ?? p.category?.gstRate ?? 5}%</span>
+                            <span style={{ fontSize: '0.66rem', opacity: 0.75, fontWeight: 600 }}>(Cat)</span>
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.22rem 0.6rem',
+                              borderRadius: '0.375rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              backgroundColor: '#fffbeb',
+                              color: '#b45309',
+                              border: '1px solid #fde68a',
+                            }}
+                            title="Product Custom GST Override"
+                          >
+                            <span>GST {p.gstRate ?? p.effectiveGstRate ?? 5}%</span>
+                            <span style={{ fontSize: '0.66rem', opacity: 0.75, fontWeight: 600 }}>(Custom)</span>
+                          </span>
+                        )}
+                      </td>
+                      <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span style={{ fontWeight: 600, color: isLow ? '#b45309' : '#0f172a' }}>
                             {totalStock} units
@@ -796,6 +908,12 @@ export const ProductsPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+        <Pagination
+          pagination={pagination}
+          onPageChange={setPage}
+          onLimitChange={setLimit}
+          loading={loading}
+        />
       </div>
 
       {/* Multi-Step Creation Wizard Modal */}
@@ -804,13 +922,17 @@ export const ProductsPage: React.FC = () => {
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.85)',
-            backdropFilter: 'blur(10px)',
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(8px)',
             zIndex: 50,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '1.5rem',
+            padding: '1rem',
+            overflowY: 'auto',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsWizardOpen(false);
           }}
         >
           <div
@@ -818,15 +940,17 @@ export const ProductsPage: React.FC = () => {
             style={{
               maxWidth: '46rem',
               width: '100%',
-              maxHeight: '90vh',
+              maxHeight: 'calc(100vh - 2.5rem)',
               borderRadius: '1.5rem',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              margin: 'auto',
             }}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Wizard Header */}
-            <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '1.25rem 1.75rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#ffffff', flexShrink: 0 }}>
               <div>
                 <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a' }}>
                   Add New Product
@@ -841,28 +965,60 @@ export const ProductsPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Step indicator pills */}
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {[1, 2, 3, 4].map((step) => (
-                  <div
-                    key={step}
-                    style={{
-                      width: '2rem',
-                      height: '2rem',
-                      borderRadius: '9999px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      backgroundColor: wizardStep === step ? 'var(--accent-amber)' : 'rgba(255,255,255,0.05)',
-                      color: wizardStep === step ? '#090d16' : 'var(--text-muted)',
-                      border: wizardStep === step ? 'none' : '1px solid var(--border-color)',
-                    }}
-                  >
-                    {step}
-                  </div>
-                ))}
+              {/* Step indicator pills & Close button */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  {[1, 2, 3, 4].map((step) => (
+                    <div
+                      key={step}
+                      style={{
+                        width: '2rem',
+                        height: '2rem',
+                        borderRadius: '9999px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        backgroundColor: wizardStep === step ? 'var(--accent-amber)' : 'rgba(0,0,0,0.05)',
+                        color: wizardStep === step ? '#ffffff' : 'var(--text-muted)',
+                        border: wizardStep === step ? 'none' : '1px solid var(--border-color)',
+                      }}
+                    >
+                      {step}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsWizardOpen(false)}
+                  style={{
+                    background: '#f1f5f9',
+                    border: '1px solid #e2e8f0',
+                    color: '#64748b',
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Close Wizard (Esc)"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#fee2e2';
+                    e.currentTarget.style.color = '#ef4444';
+                    e.currentTarget.style.borderColor = '#fca5a5';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#f1f5f9';
+                    e.currentTarget.style.color = '#64748b';
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                  }}
+                >
+                  <X size={18} />
+                </button>
               </div>
             </div>
 
@@ -1000,6 +1156,45 @@ export const ProductsPage: React.FC = () => {
                         <option value="ACTIVE">ACTIVE (Storefront Visible)</option>
                         <option value="DRAFT">DRAFT (Hidden)</option>
                       </select>
+                    </div>
+
+                    {/* GST Tax Configuration */}
+                    <div
+                      style={{
+                        gridColumn: '1 / -1',
+                        padding: '1rem',
+                        borderRadius: '0.75rem',
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', marginBottom: baseForm.useCategoryGst ? '0' : '0.75rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={baseForm.useCategoryGst}
+                          onChange={(e) => setBaseForm({ ...baseForm, useCategoryGst: e.target.checked })}
+                          style={{ width: '1.1rem', height: '1.1rem', accentColor: '#166534', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>
+                            Use Category Default GST Rate
+                          </strong>
+                          <p style={{ fontSize: '0.74rem', color: '#64748b', margin: 0 }}>
+                            Inherit tax percentage from the selected category (e.g. 5%).
+                          </p>
+                        </div>
+                      </label>
+
+                      {!baseForm.useCategoryGst && (
+                        <div style={{ marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+                          <DynamicGstSelect
+                            label="Product Custom GST Rate Override (%) *"
+                            value={Number(baseForm.gstRate || 0)}
+                            onChange={(rate) => setBaseForm({ ...baseForm, gstRate: String(rate) })}
+                            style={{ maxWidth: '360px' }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1363,13 +1558,17 @@ export const ProductsPage: React.FC = () => {
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(6px)',
             zIndex: 50,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '1.5rem',
+            padding: '1rem',
+            overflowY: 'auto',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsEditModalOpen(false);
           }}
         >
           <div
@@ -1377,14 +1576,16 @@ export const ProductsPage: React.FC = () => {
             style={{
               maxWidth: '54rem',
               width: '100%',
-              maxHeight: '90vh',
+              maxHeight: 'calc(100vh - 2.5rem)',
               borderRadius: '1.25rem',
               backgroundColor: '#ffffff',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+              boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              margin: 'auto',
             }}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
             <div style={{ padding: '1.25rem 1.75rem', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f8fafc' }}>
@@ -1595,6 +1796,44 @@ export const ProductsPage: React.FC = () => {
                           <option value="INACTIVE">INACTIVE</option>
                         </select>
                       </div>
+                    </div>
+
+                    {/* GST Tax Configuration in Edit Modal */}
+                    <div
+                      style={{
+                        padding: '1rem',
+                        borderRadius: '0.75rem',
+                        backgroundColor: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', cursor: 'pointer', marginBottom: editForm.useCategoryGst ? '0' : '0.75rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={editForm.useCategoryGst}
+                          onChange={(e) => setEditForm({ ...editForm, useCategoryGst: e.target.checked })}
+                          style={{ width: '1.1rem', height: '1.1rem', accentColor: '#166534', cursor: 'pointer' }}
+                        />
+                        <div>
+                          <strong style={{ fontSize: '0.85rem', color: '#0f172a' }}>
+                            Use Category Default GST Rate
+                          </strong>
+                          <p style={{ fontSize: '0.74rem', color: '#64748b', margin: 0 }}>
+                            Inherit tax percentage from the selected category.
+                          </p>
+                        </div>
+                      </label>
+
+                      {!editForm.useCategoryGst && (
+                        <div style={{ marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+                          <DynamicGstSelect
+                            label="Product Custom GST Rate Override (%) *"
+                            value={Number(editForm.gstRate || 0)}
+                            onChange={(rate) => setEditForm({ ...editForm, gstRate: String(rate) })}
+                            style={{ maxWidth: '360px' }}
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Description */}

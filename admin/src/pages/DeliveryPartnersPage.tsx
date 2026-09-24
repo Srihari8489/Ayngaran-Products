@@ -6,14 +6,28 @@ import {
   Trash2,
   ExternalLink,
   Phone,
-  Mail
+  Mail,
+  Search,
+  Filter,
+  X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { DeliveryPartner } from '../types';
+import { DeliveryPartner, PaginationMeta } from '../types';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { AdminModal } from '../components/AdminModal';
 
 export const DeliveryPartnersPage: React.FC = () => {
   const [partners, setPartners] = useState<DeliveryPartner[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Filters & Pagination
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -33,8 +47,18 @@ export const DeliveryPartnersPage: React.FC = () => {
   const fetchPartners = async () => {
     try {
       setLoading(true);
-      const res: any = await adminApi.get('/delivery-partners');
-      setPartners(res.data || res || []);
+      const params = new URLSearchParams();
+      params.append('page', page.toString());
+      params.append('limit', limit.toString());
+      if (statusFilter !== 'ALL') params.append('status', statusFilter);
+      if (debouncedSearch) params.append('search', debouncedSearch);
+
+      const res: any = await adminApi.get(`/delivery-partners?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setPartners(items);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load delivery partners:', err);
     } finally {
@@ -43,8 +67,12 @@ export const DeliveryPartnersPage: React.FC = () => {
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter]);
+
+  useEffect(() => {
     fetchPartners();
-  }, []);
+  }, [page, limit, debouncedSearch, statusFilter]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,6 +148,94 @@ export const DeliveryPartnersPage: React.FC = () => {
         </button>
       </div>
 
+      {/* Filter and Search Bar */}
+      <div
+        className="glass-card"
+        style={{
+          padding: '1rem 1.25rem',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '1rem',
+        }}
+      >
+        <div style={{ position: 'relative', flex: 1, minWidth: '260px', maxWidth: '380px' }}>
+          <Search
+            size={16}
+            style={{
+              position: 'absolute',
+              left: '0.9rem',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: '#94a3b8',
+              pointerEvents: 'none',
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Search by name, code, contact..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="form-input"
+            style={{
+              paddingLeft: '2.6rem',
+              paddingRight: search ? '2.4rem' : '0.9rem',
+              fontSize: '0.875rem',
+            }}
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              style={{
+                position: 'absolute',
+                right: '0.75rem',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '0.2rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              title="Clear search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          {(['ALL', 'ACTIVE', 'INACTIVE'] as const).map((st) => {
+            const isActive = statusFilter === st;
+            return (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                style={{
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '0.5rem',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  backgroundColor: isActive ? '#1a3d2b' : '#ffffff',
+                  color: isActive ? '#ffffff' : '#64748b',
+                  border: isActive ? '1px solid #1a3d2b' : '1px solid #e2e8f0',
+                  boxShadow: isActive ? '0 2px 6px rgba(26, 61, 43, 0.2)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {st === 'ALL' ? 'All Partners' : st === 'ACTIVE' ? 'Active' : 'Suspended'}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Table */}
       <div className="glass-card" style={{ padding: '1.5rem', overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
@@ -144,7 +260,7 @@ export const DeliveryPartnersPage: React.FC = () => {
               ) : partners.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
-                    No delivery partners registered yet. Click "Add Delivery Partner" to create one.
+                    No delivery partners found matching criteria.
                   </td>
                 </tr>
               ) : (
@@ -225,216 +341,205 @@ export const DeliveryPartnersPage: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          pagination={pagination}
+          onPageChange={(p) => setPage(p)}
+          onLimitChange={(l) => {
+            setLimit(l);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* Create Modal */}
-      {isCreateModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '30rem', width: '100%', padding: '2rem', borderRadius: '1.25rem', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Add Delivery Partner
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Partner Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g. BlueDart, Delhivery"
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Partner Code *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    value={formData.partnerCode}
-                    onChange={(e) => setFormData({ ...formData, partnerCode: e.target.value.toUpperCase() })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={formData.contactPhone}
-                    onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
-                    placeholder="+91 1800..."
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Support Email
-                  </label>
-                  <input
-                    type="email"
-                    className="form-input"
-                    value={formData.contactEmail}
-                    onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
-                    placeholder="support@partner.com"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Live Tracking URL Template (Use <code>&#123;tracking_number&#125;</code>)
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={formData.trackingUrlTemplate}
-                  onChange={(e) => setFormData({ ...formData, trackingUrlTemplate: e.target.value })}
-                  placeholder="https://track.bluedart.com/?awb={tracking_number}"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Register Partner
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Add Delivery Partner"
+        subtitle="Register a new courier or logistics provider"
+        maxWidth="32rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Partner Name *
+              </label>
+              <input
+                type="text"
+                required
+                className="form-input"
+                value={formData.name}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const code = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'COURIER';
+                  setFormData({
+                    ...formData,
+                    name,
+                    partnerCode: `${code}-${Date.now().toString().slice(-3)}`,
+                  });
+                }}
+                placeholder="e.g. BlueDart Express"
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Identifier Code *
+              </label>
+              <input
+                type="text"
+                required
+                className="form-input"
+                value={formData.partnerCode}
+                onChange={(e) => setFormData({ ...formData, partnerCode: e.target.value.toUpperCase() })}
+                placeholder="e.g. BLUEDART"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Support Phone
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                value={formData.contactPhone}
+                onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                placeholder="e.g. 1800 209 1234"
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Support Email
+              </label>
+              <input
+                type="email"
+                className="form-input"
+                value={formData.contactEmail}
+                onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
+                placeholder="support@partner.com"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Tracking URL Template
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={formData.trackingUrlTemplate}
+              onChange={(e) => setFormData({ ...formData, trackingUrlTemplate: e.target.value })}
+              placeholder="e.g. https://partner.com/track?num={{tracking_number}}"
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Register Partner
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Edit Modal */}
-      {isEditModalOpen && selectedPartner && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '30rem', width: '100%', padding: '2rem', borderRadius: '1.25rem', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Edit Partner: {selectedPartner.name}
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Partner Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={formData.contactPhone}
-                    onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    className="form-input"
-                    value={formData.contactEmail}
-                    onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Tracking URL Template
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={formData.trackingUrlTemplate}
-                  onChange={(e) => setFormData({ ...formData, trackingUrlTemplate: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditModalOpen && !!selectedPartner}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Edit Partner: ${selectedPartner?.name || ''}`}
+        subtitle={`Partner Code: ${selectedPartner?.partnerCode || ''}`}
+        maxWidth="32rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleUpdate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Partner Name
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Support Phone
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                value={formData.contactPhone}
+                onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Support Email
+              </label>
+              <input
+                type="email"
+                className="form-input"
+                value={formData.contactEmail}
+                onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Tracking URL Template
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={formData.trackingUrlTemplate}
+              onChange={(e) => setFormData({ ...formData, trackingUrlTemplate: e.target.value })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };
-

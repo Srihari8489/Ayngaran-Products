@@ -37,8 +37,8 @@ export class ReviewsController {
   @UseGuards(StaffJwtAuthGuard, PermissionsGuard)
   @RequirePermissions('REVIEWS_MODERATE')
   @Get('admin/all')
-  async getAdminReviews(@Query('status') status?: string) {
-    return this.reviewsService.getAdminReviews(status);
+  async getAdminReviews(@Query() query?: any) {
+    return this.reviewsService.getAdminReviews(query);
   }
 
   @UseGuards(StaffJwtAuthGuard, PermissionsGuard)

@@ -6,10 +6,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { AssignDeliveryDto } from './dto/assign-delivery.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   // -------------------------------------------------------------
   // CUSTOMER ORDER WORKFLOWS
@@ -28,23 +29,51 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return orders.map((o) => ({
-      id: o.id,
-      orderNumber: o.orderNumber,
-      totalAmount: Number(o.totalAmount),
-      orderStatus: o.orderStatus,
-      paymentStatus: o.paymentStatus,
-      itemCount: o.items.reduce((acc, i) => acc + i.quantity, 0),
-      items: o.items.map((i) => ({
-        id: i.id,
-        quantity: i.quantity,
-        unitPrice: Number(i.unitPrice),
-        totalPrice: Number(i.totalPrice),
-        snapshot: JSON.parse(i.productSnapshotJson),
-      })),
-      delivery: o.deliveryAssignments[0] || null,
-      createdAt: o.createdAt,
-    }));
+    return orders.map((o) => {
+      let shippingAddress: any = null;
+      try {
+        shippingAddress = JSON.parse(o.shippingAddressJson);
+      } catch {
+        shippingAddress = null;
+      }
+
+      let billingAddress: any = null;
+      if (o.billingAddressJson) {
+        try {
+          billingAddress = JSON.parse(o.billingAddressJson);
+        } catch {
+          billingAddress = null;
+        }
+      }
+
+      return {
+        id: o.id,
+        orderNumber: o.orderNumber,
+        subtotal: Number(o.subtotal),
+        shippingFee: Number(o.shippingFee),
+        taxAmount: Number(o.taxAmount),
+        discountAmount: Number(o.discountAmount || 0),
+        totalAmount: Number(o.totalAmount),
+        orderStatus: o.orderStatus,
+        paymentStatus: o.paymentStatus,
+        shippingAddress,
+        billingAddress,
+        itemCount: o.items.reduce((acc, i) => acc + i.quantity, 0),
+        items: o.items.map((i) => ({
+          id: i.id,
+          productId: i.productId,
+          variantId: i.variantId,
+          quantity: i.quantity,
+          unitPrice: Number(i.unitPrice),
+          totalPrice: Number(i.totalPrice),
+          gstRate: Number(i.gstRate || 0),
+          gstAmount: Number(i.gstAmount || 0),
+          snapshot: JSON.parse(i.productSnapshotJson),
+        })),
+        delivery: o.deliveryAssignments[0] || null,
+        createdAt: o.createdAt,
+      };
+    });
   }
 
   async getUserOrderDetails(userId: number, orderId: number) {
@@ -171,72 +200,739 @@ export class OrdersService {
   // -------------------------------------------------------------
 
   async getAllOrders(query: any = {}) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+
     const where: any = {};
 
-    if (query.orderStatus) where.orderStatus = query.orderStatus;
-    if (query.paymentStatus) where.paymentStatus = query.paymentStatus;
-    if (query.orderNumber) where.orderNumber = { contains: query.orderNumber.trim() };
+    if (query.orderStatus && query.orderStatus !== 'ALL') {
+      where.orderStatus = query.orderStatus;
+    }
 
-    const orders = await this.prisma.client.order.findMany({
-      where,
-      include: {
-        user: { select: { id: true, name: true, email: true, phone: true, userCode: true } },
-        items: true,
-        deliveryAssignments: {
-          include: { deliveryPartner: { select: { name: true, partnerCode: true } } },
+    if (query.paymentStatus && query.paymentStatus !== 'ALL') {
+      where.paymentStatus = query.paymentStatus;
+    }
+
+    const searchTerm = (query.search || query.orderNumber || '').trim();
+    if (searchTerm) {
+      where.OR = [
+        { orderNumber: { contains: searchTerm } },
+        { user: { name: { contains: searchTerm } } },
+        { user: { phone: { contains: searchTerm } } },
+        { user: { email: { contains: searchTerm } } },
+        { user: { userCode: { contains: searchTerm } } },
+        { shippingAddressJson: { contains: searchTerm } },
+        { items: { some: { snapshotJson: { contains: searchTerm } } } },
+      ];
+    }
+
+    const [total, orders] = await Promise.all([
+      this.prisma.client.order.count({ where }),
+      this.prisma.client.order.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              userCode: true,
+            },
+          },
+
+          items: true,
+
+          deliveryAssignments: {
+            include: {
+              deliveryPartner: {
+                select: {
+                  name: true,
+                  partnerCode: true,
+                },
+              },
+            },
+          },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
 
-    return orders.map((o) => {
-      const address = JSON.parse(o.shippingAddressJson || '{}');
-      return {
-        id: o.id,
-        orderNumber: o.orderNumber,
-        customer: o.user,
-        location: `${address.city || ''}, ${address.state || ''}`,
-        totalAmount: Number(o.totalAmount),
-        orderStatus: o.orderStatus,
-        paymentStatus: o.paymentStatus,
-        itemCount: o.items.reduce((acc, i) => acc + i.quantity, 0),
-        deliveryPartner: o.deliveryAssignments[0]?.deliveryPartner?.name || 'Unassigned',
-        deliveryStatus: o.deliveryAssignments[0]?.status || 'UNASSIGNED',
-        trackingNumber: o.deliveryAssignments[0]?.trackingNumber || null,
-        createdAt: o.createdAt,
-      };
-    });
+        orderBy: {
+          createdAt: 'desc',
+        },
+
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    const items = await Promise.all(
+      orders.map(async (o) => {
+        // ---------------------------------------------------------
+        // Shipping Address
+        // ---------------------------------------------------------
+
+        let address: any = {};
+
+        try {
+          address = JSON.parse(o.shippingAddressJson || '{}');
+        } catch {
+          address = {};
+        }
+
+        // ---------------------------------------------------------
+        // Customer
+        // ---------------------------------------------------------
+
+        const customerObj = {
+          id: o.user?.id || o.userId,
+
+          name:
+            o.user?.name && o.user.name !== 'Customer'
+              ? o.user.name
+              : address.recipientName ||
+              address.fullName ||
+              'Customer',
+
+          phone:
+            o.user?.phone ||
+            address.phone ||
+            address.mobile ||
+            'N/A',
+
+          email:
+            o.user?.email ||
+            address.email ||
+            '',
+
+          userCode:
+            o.user?.userCode ||
+            `CUST-${o.userId}`,
+        };
+
+        // ---------------------------------------------------------
+        // Order Items
+        // ---------------------------------------------------------
+
+        const mappedItems = await Promise.all(
+          o.items.map(async (i) => {
+            // -----------------------------------------------------
+            // Parse historical snapshot
+            // -----------------------------------------------------
+
+            let snap: any = null;
+
+            try {
+              if (i.productSnapshotJson) {
+                snap = JSON.parse(i.productSnapshotJson);
+              }
+            } catch {
+              snap = null;
+            }
+
+            // -----------------------------------------------------
+            // Fetch Product
+            // -----------------------------------------------------
+
+            const p = i.productId
+              ? await this.prisma.client.product.findUnique({
+                where: {
+                  id: i.productId,
+                },
+
+                include: {
+                  images: true,
+                  brand: true,
+                },
+              })
+              : null;
+
+            // -----------------------------------------------------
+            // Fetch Variant + Attributes
+            // -----------------------------------------------------
+
+            const v = i.variantId
+              ? await this.prisma.client.productVariant.findUnique({
+                where: {
+                  id: i.variantId,
+                },
+
+                include: {
+                  variantValues: {
+                    include: {
+                      attribute: true,
+                      attributeValue: true,
+                    },
+                  },
+                },
+              })
+              : null;
+
+            // -----------------------------------------------------
+            // Variant Attributes
+            // -----------------------------------------------------
+
+            const variantAttributes =
+              v?.variantValues?.map((vv: any) => ({
+                attributeId:
+                  vv.attribute?.id || vv.attributeId,
+
+                attributeName:
+                  vv.attribute?.name || '',
+
+                attributeSlug:
+                  vv.attribute?.slug || '',
+
+                attributeValueId:
+                  vv.attributeValue?.id,
+
+                value:
+                  vv.attributeValue?.value || '',
+
+                displayName:
+                  vv.attributeValue?.displayName || '',
+
+                unit:
+                  vv.attribute?.unit || null,
+              })) || [];
+
+            // -----------------------------------------------------
+            // Variant Label
+            // -----------------------------------------------------
+
+            const attrLabels = variantAttributes
+              .map(
+                (attr: any) =>
+                  attr.displayName || attr.value,
+              )
+              .filter(Boolean);
+
+            const vLabel =
+              attrLabels.length > 0
+                ? attrLabels.join(' / ')
+                : v
+                  ? v.weight
+                    ? `${v.weight}g`
+                    : v.sku
+                  : undefined;
+
+            // -----------------------------------------------------
+            // Product Snapshot
+            // -----------------------------------------------------
+
+            snap = {
+              name:
+                snap?.name ||
+                p?.name ||
+                'Ayngaran Product',
+
+              productCode:
+                snap?.productCode ||
+                p?.productCode ||
+                '',
+
+              brand:
+                snap?.brand ||
+                p?.brand?.name ||
+                'Ayngaran',
+
+              sku:
+                snap?.sku ||
+                v?.sku ||
+                '',
+
+              variantLabel:
+                snap?.variantLabel ||
+                vLabel,
+
+              image:
+                snap?.image ||
+                p?.images?.[0]?.url ||
+                null,
+            };
+
+            // -----------------------------------------------------
+            // Return Order Item
+            // -----------------------------------------------------
+
+            return {
+              id: i.id,
+
+              productId: i.productId,
+
+              variantId: i.variantId,
+
+              quantity: i.quantity,
+
+              // IMPORTANT:
+              // This is the historical price actually paid.
+              unitPrice: Number(i.unitPrice),
+
+              totalPrice: Number(i.totalPrice),
+
+              // Historical product information
+              snapshot: snap,
+
+              // Current variant information
+              variant: v
+                ? {
+                  id: v.id,
+
+                  sku: v.sku,
+
+                  price: Number(v.price),
+
+                  stockQuantity:
+                    v.stockQuantity,
+
+                  barcode:
+                    v.barcode,
+
+                  weight:
+                    v.weight,
+
+                  status:
+                    v.status,
+                }
+                : null,
+
+              // Dynamic variant attributes
+              attributes:
+                variantAttributes,
+            };
+          }),
+        );
+
+        // ---------------------------------------------------------
+        // Return Order
+        // ---------------------------------------------------------
+
+        return {
+          id: o.id,
+
+          orderNumber: o.orderNumber,
+
+          customer: customerObj,
+
+          // Keep this for existing frontend compatibility
+          user: customerObj,
+
+          location: address.city
+            ? `${address.city}, ${address.state || ''}`
+            : 'India',
+
+          subtotal: Number(o.subtotal),
+
+          shippingFee: Number(o.shippingFee),
+
+          taxAmount: Number(o.taxAmount),
+
+          totalAmount: Number(o.totalAmount),
+
+          orderStatus: o.orderStatus,
+
+          paymentStatus: o.paymentStatus,
+
+          itemCount: o.items.reduce(
+            (acc, i) => acc + i.quantity,
+            0,
+          ),
+
+          items: mappedItems,
+
+          shippingAddress: address,
+
+          shippingAddressJson: o.shippingAddressJson,
+
+          billingAddress: o.billingAddressJson
+            ? (() => {
+                try {
+                  return JSON.parse(o.billingAddressJson);
+                } catch {
+                  return null;
+                }
+              })()
+            : null,
+
+          deliveryPartner:
+            o.deliveryAssignments[0]
+              ?.deliveryPartner?.name ||
+            'Unassigned',
+
+          deliveryStatus:
+            o.deliveryAssignments[0]?.status ||
+            'UNASSIGNED',
+
+          trackingNumber:
+            o.deliveryAssignments[0]
+              ?.trackingNumber || null,
+
+          createdAt: o.createdAt,
+        };
+      }),
+    );
+
+    return createPaginatedResponse(items, total, page, limit);
   }
 
-  async getAdminOrderDetails(orderId: number) {
-    const order = await this.prisma.client.order.findUnique({
-      where: { id: orderId },
-      include: {
-        user: true,
-        items: true,
-        payments: true,
-        deliveryAssignments: {
-          include: { deliveryPartner: true },
-        },
-      },
-    });
 
-    if (!order) throw new NotFoundException('Order not found');
+  async getAdminOrderDetails(orderId: number) {
+    // -----------------------------------------------------------
+    // Fetch Order
+    // -----------------------------------------------------------
+
+    const order =
+      await this.prisma.client.order.findUnique({
+        where: {
+          id: orderId,
+        },
+
+        include: {
+          user: true,
+
+          items: true,
+
+          payments: true,
+
+          deliveryAssignments: {
+            include: {
+              deliveryPartner: true,
+            },
+          },
+        },
+      });
+
+    if (!order) {
+      throw new NotFoundException(
+        'Order not found',
+      );
+    }
+
+    // -----------------------------------------------------------
+    // Shipping Address
+    // -----------------------------------------------------------
+
+    let address: any = {};
+
+    try {
+      address = JSON.parse(
+        order.shippingAddressJson || '{}',
+      );
+    } catch {
+      address = {};
+    }
+
+    // -----------------------------------------------------------
+    // Customer
+    // -----------------------------------------------------------
+
+    const customerObj = {
+      id:
+        order.user?.id ||
+        order.userId,
+
+      name:
+        order.user?.name &&
+          order.user.name !== 'Customer'
+          ? order.user.name
+          : address.recipientName ||
+          address.fullName ||
+          'Customer',
+
+      phone:
+        order.user?.phone ||
+        address.phone ||
+        address.mobile ||
+        'N/A',
+
+      email:
+        order.user?.email ||
+        address.email ||
+        '',
+
+      userCode:
+        order.user?.userCode ||
+        `CUST-${order.userId}`,
+    };
+
+    // -----------------------------------------------------------
+    // Order Items
+    // -----------------------------------------------------------
+
+    const mappedItems = await Promise.all(
+      order.items.map(async (i) => {
+        // -------------------------------------------------------
+        // Parse Historical Snapshot
+        // -------------------------------------------------------
+
+        let snap: any = null;
+
+        try {
+          if (i.productSnapshotJson) {
+            snap = JSON.parse(
+              i.productSnapshotJson,
+            );
+          }
+        } catch {
+          snap = null;
+        }
+
+        // -------------------------------------------------------
+        // Fetch Product
+        // -------------------------------------------------------
+
+        const p = i.productId
+          ? await this.prisma.client.product.findUnique({
+            where: {
+              id: i.productId,
+            },
+
+            include: {
+              images: true,
+              brand: true,
+            },
+          })
+          : null;
+
+        // -------------------------------------------------------
+        // Fetch Variant + Attributes
+        // -------------------------------------------------------
+
+        const v = i.variantId
+          ? await this.prisma.client.productVariant.findUnique({
+            where: {
+              id: i.variantId,
+            },
+
+            include: {
+              variantValues: {
+                include: {
+                  attribute: true,
+                  attributeValue: true,
+                },
+              },
+            },
+          })
+          : null;
+
+        // -------------------------------------------------------
+        // Variant Attributes
+        // -------------------------------------------------------
+
+        const variantAttributes =
+          v?.variantValues?.map((vv: any) => ({
+            attributeId:
+              vv.attribute?.id ||
+              vv.attributeId,
+
+            attributeName:
+              vv.attribute?.name || '',
+
+            attributeSlug:
+              vv.attribute?.slug || '',
+
+            attributeValueId:
+              vv.attributeValue?.id,
+
+            value:
+              vv.attributeValue?.value || '',
+
+            displayName:
+              vv.attributeValue?.displayName || '',
+
+            unit:
+              vv.attribute?.unit || null,
+          })) || [];
+
+        // -------------------------------------------------------
+        // Variant Label
+        // -------------------------------------------------------
+
+        const attrLabels = variantAttributes
+          .map(
+            (attr: any) =>
+              attr.displayName ||
+              attr.value,
+          )
+          .filter(Boolean);
+
+        const vLabel =
+          attrLabels.length > 0
+            ? attrLabels.join(' / ')
+            : v
+              ? v.weight
+                ? `${v.weight}g`
+                : v.sku
+              : undefined;
+
+        // -------------------------------------------------------
+        // Product Snapshot
+        // -------------------------------------------------------
+
+        snap = {
+          name:
+            snap?.name ||
+            p?.name ||
+            'Ayngaran Product',
+
+          productCode:
+            snap?.productCode ||
+            p?.productCode ||
+            '',
+
+          brand:
+            snap?.brand ||
+            p?.brand?.name ||
+            'Ayngaran',
+
+          sku:
+            snap?.sku ||
+            v?.sku ||
+            '',
+
+          variantLabel:
+            snap?.variantLabel ||
+            vLabel,
+
+          image:
+            snap?.image ||
+            p?.images?.[0]?.url ||
+            null,
+        };
+
+        // -------------------------------------------------------
+        // Return Item
+        // -------------------------------------------------------
+
+        return {
+          id: i.id,
+
+          productId: i.productId,
+
+          variantId: i.variantId,
+
+          quantity: i.quantity,
+
+          // Historical purchased price
+          unitPrice: Number(i.unitPrice),
+
+          totalPrice: Number(i.totalPrice),
+
+          // Historical product information
+          snapshot: snap,
+
+          // Current variant information
+          variant: v
+            ? {
+              id: v.id,
+
+              sku: v.sku,
+
+              price: Number(v.price),
+
+              stockQuantity:
+                v.stockQuantity,
+
+              barcode:
+                v.barcode,
+
+              weight:
+                v.weight,
+
+              status:
+                v.status,
+            }
+            : null,
+
+          // Dynamic variant attributes
+          attributes:
+            variantAttributes,
+        };
+      }),
+    );
+
+    // -----------------------------------------------------------
+    // Return Complete Admin Order Details
+    // -----------------------------------------------------------
 
     return {
-      ...order,
-      subtotal: Number(order.subtotal),
-      shippingFee: Number(order.shippingFee),
-      taxAmount: Number(order.taxAmount),
-      totalAmount: Number(order.totalAmount),
-      shippingAddress: JSON.parse(order.shippingAddressJson),
-      items: order.items.map((i) => ({
-        ...i,
-        unitPrice: Number(i.unitPrice),
-        totalPrice: Number(i.totalPrice),
-        snapshot: JSON.parse(i.productSnapshotJson),
-      })),
+      id: order.id,
+
+      orderNumber:
+        order.orderNumber,
+
+      user: customerObj,
+
+      customer: customerObj,
+
+      subtotal:
+        Number(order.subtotal),
+
+      shippingFee:
+        Number(order.shippingFee),
+
+      taxAmount:
+        Number(order.taxAmount),
+
+      totalAmount:
+        Number(order.totalAmount),
+
+      orderStatus:
+        order.orderStatus,
+
+      paymentStatus:
+        order.paymentStatus,
+
+      shippingAddress:
+        address,
+
+      billingAddress:
+        order.billingAddressJson
+          ? JSON.parse(
+            order.billingAddressJson,
+          )
+          : null,
+
+      notes:
+        order.notes,
+
+      itemCount:
+        order.items.reduce(
+          (acc, i) =>
+            acc + i.quantity,
+          0,
+        ),
+
+      items:
+        mappedItems,
+
+      payments:
+        order.payments.map((p) => ({
+          id: p.id,
+
+          gatewayCode:
+            p.gatewayCode,
+
+          transactionId:
+            p.transactionId,
+
+          amount:
+            Number(p.amount),
+
+          currency:
+            p.currency,
+
+          status:
+            p.status,
+
+          verifiedAt:
+            p.verifiedAt,
+        })),
+
+      deliveryAssignments:
+        order.deliveryAssignments,
+
+      createdAt:
+        order.createdAt,
     };
   }
 

@@ -26,7 +26,15 @@ adminApi.interceptors.response.use(
   (response) => {
     // If wrapped in standard response { success: true, data: ... }
     if (response.data && typeof response.data === 'object' && 'data' in response.data) {
-      return response.data;
+      if ('pagination' in response.data) {
+        return {
+          data: response.data.data,
+          items: response.data.items || response.data.data,
+          pagination: response.data.pagination,
+          ...response.data,
+        };
+      }
+      return response.data.data;
     }
     return response.data;
   },

@@ -301,10 +301,10 @@ export const ReportsPage: React.FC = () => {
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.85rem', borderRadius: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div>
                     <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.88rem' }}>{cat.name}</span>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{cat.unitsSold || 0} units sold</div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{cat.itemsSold ?? cat.unitsSold ?? 0} units sold</div>
                   </div>
                   <span style={{ fontWeight: 700, color: '#b45309', fontSize: '0.88rem' }}>
-                    ₹{Number(cat.revenue || 0).toLocaleString('en-IN')}
+                    ₹{Number(cat.totalRevenue ?? cat.revenue ?? 0).toLocaleString('en-IN')}
                   </span>
                 </div>
               ))
@@ -327,10 +327,10 @@ export const ReportsPage: React.FC = () => {
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.65rem 0.85rem', borderRadius: '0.5rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div>
                     <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.88rem' }}>{b.name}</span>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{b.unitsSold || 0} units sold</div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{b.itemsSold ?? b.unitsSold ?? 0} units sold</div>
                   </div>
                   <span style={{ fontWeight: 700, color: '#b45309', fontSize: '0.88rem' }}>
-                    ₹{Number(b.revenue || 0).toLocaleString('en-IN')}
+                    ₹{Number(b.totalRevenue ?? b.revenue ?? 0).toLocaleString('en-IN')}
                   </span>
                 </div>
               ))

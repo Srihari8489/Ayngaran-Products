@@ -91,7 +91,7 @@ export class CheckoutService {
     for (const item of orderItemsToProcess) {
       const product = await this.prisma.client.product.findUnique({
         where: { id: item.productId },
-        include: { brand: true, images: { where: { isPrimary: true }, take: 1 } },
+        include: { brand: true, category: true, images: { where: { isPrimary: true }, take: 1 } },
       });
 
       if (!product || product.status !== 'ACTIVE') {
@@ -100,10 +100,19 @@ export class CheckoutService {
 
       let unitPrice = Number(product.basePrice);
       let variantSku: string | null = null;
+      let variantLabel: string | null = null;
 
       if (item.variantId) {
         const variant = await this.prisma.client.productVariant.findUnique({
           where: { id: item.variantId },
+          include: {
+            variantValues: {
+              include: {
+                attributeValue: true,
+                attribute: true,
+              },
+            },
+          },
         });
 
         if (!variant || variant.status !== 'ACTIVE') {
@@ -118,10 +127,26 @@ export class CheckoutService {
 
         unitPrice = Number(variant.price);
         variantSku = variant.sku;
+
+        const attrLabels = variant.variantValues?.map((vv: any) => vv.attributeValue?.displayName).filter(Boolean);
+        if (attrLabels && attrLabels.length > 0) {
+          variantLabel = attrLabels.join(' / ');
+        } else if (variant.weight) {
+          variantLabel = `${variant.weight}g`;
+        } else {
+          variantLabel = variant.sku;
+        }
       }
 
       const itemTotal = unitPrice * item.quantity;
       subtotal += itemTotal;
+
+      // Hierarchical GST Calculation: Category Default -> Product Override
+      const categoryGst = Number(product.category?.gstRate ?? 5);
+      const effectiveGstRate = product.useCategoryGst
+        ? categoryGst
+        : (product.gstRate !== null && product.gstRate !== undefined ? Number(product.gstRate) : categoryGst);
+      const itemGstAmount = Math.round(itemTotal * (effectiveGstRate / 100) * 100) / 100;
 
       validatedItems.push({
         productId: item.productId,
@@ -129,20 +154,26 @@ export class CheckoutService {
         quantity: item.quantity,
         unitPrice,
         totalPrice: itemTotal,
+        gstRate: effectiveGstRate,
+        gstAmount: itemGstAmount,
         productSnapshot: {
           name: product.name,
           productCode: product.productCode,
-          brand: product.brand.name,
+          brand: product.brand?.name || 'Ayngaran',
           sku: variantSku,
+          variantLabel,
           image: product.images[0]?.url || null,
+          gstRate: effectiveGstRate,
+          gstAmount: itemGstAmount,
+          categoryName: product.category?.name || 'General',
         },
       });
     }
 
-    // Taxes & Shipping calculations
+    // Taxes & Shipping calculations based on itemized GST snapshots
     const shippingFee = subtotal >= 1000 ? 0 : 99;
-    const taxAmount = Math.round(subtotal * 0.18 * 100) / 100; // 18% GST
-    const totalAmount = subtotal + shippingFee + taxAmount;
+    const taxAmount = Math.round(validatedItems.reduce((acc, it) => acc + it.gstAmount, 0) * 100) / 100;
+    const totalAmount = Math.round((subtotal + shippingFee + taxAmount) * 100) / 100;
 
     // Generate unique order number (e.g. ORD-2026-874123)
     const orderNumber = `ORD-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -205,6 +236,8 @@ export class CheckoutService {
                 quantity: vi.quantity,
                 unitPrice: vi.unitPrice,
                 totalPrice: vi.totalPrice,
+                gstRate: vi.gstRate,
+                gstAmount: vi.gstAmount,
                 productSnapshotJson: JSON.stringify(vi.productSnapshot),
               })),
             },
@@ -259,6 +292,8 @@ export class CheckoutService {
             quantity: vi.quantity,
             unitPrice: vi.unitPrice,
             totalPrice: vi.totalPrice,
+            gstRate: vi.gstRate,
+            gstAmount: vi.gstAmount,
             productSnapshotJson: JSON.stringify(vi.productSnapshot),
           })),
         },

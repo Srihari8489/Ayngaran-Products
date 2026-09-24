@@ -53,6 +53,15 @@ async function bootstrap() {
   await app.listen(port);
   logger.log(`🚀 Ayngaran E-Commerce API is running on: http://localhost:${port}/api/v1`);
   logger.log(`📁 Static uploads folder mounted on: http://localhost:${port}/uploads`);
+
+  if (process.env.WHATSAPP_OTP_MODE === 'DEMO' || process.env.OTP_HASHING === 'false') {
+    logger.warn('====================================================================');
+    logger.warn('WARNING:');
+    logger.warn('WhatsApp OTP is running in DEMO MODE.');
+    logger.warn('OTP hashing is disabled.');
+    logger.warn('This configuration MUST NOT be used in production.');
+    logger.warn('====================================================================');
+  }
 }
 
 bootstrap();

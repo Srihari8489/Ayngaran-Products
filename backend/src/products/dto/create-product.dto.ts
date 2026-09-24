@@ -141,4 +141,12 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => CreateVariantDto)
   variants?: CreateVariantDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  useCategoryGst?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  gstRate?: number;
 }

@@ -6,6 +6,7 @@ export interface Category {
   description?: string;
   image?: string;
   parentId?: number | null;
+  gstRate?: number;
   children?: Category[];
 }
 
@@ -73,8 +74,8 @@ export interface ProductVariant {
 export interface ProductImage {
   id: number;
   url: string;
-  altText?: string;
   isPrimary: boolean;
+  sortOrder: number;
 }
 
 export interface ProductAttributeValue {
@@ -97,6 +98,9 @@ export interface Product {
   brand: Brand;
   category: Category;
   categoryId?: number;
+  useCategoryGst?: boolean;
+  gstRate?: number;
+  effectiveGstRate?: number;
   images: ProductImage[];
   primaryImage?: string;
   variants: ProductVariant[];
@@ -123,6 +127,8 @@ export interface CartItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  gstRate?: number;
+  gstAmount?: number;
   currentStock: number;
   isAvailable: boolean;
   stockWarning?: string | null;
@@ -133,6 +139,7 @@ export interface Cart {
   items: CartItem[];
   totalItems: number;
   subtotal: number;
+  taxAmount?: number;
   allItemsAvailable: boolean;
 }
 
@@ -146,14 +153,18 @@ export interface User {
 }
 
 export interface UserAddress {
-  id: number;
-  recipientName: string;
+  id?: number;
+  recipientName?: string;
+  fullName?: string;
   phone: string;
   addressLine1: string;
   addressLine2?: string;
   city: string;
   state: string;
-  pincode: string;
+  pincode?: string;
+  postalCode?: string;
+  country?: string;
+  addressType?: 'HOME' | 'WORK' | 'OTHER';
   isDefault?: boolean;
 }
 
@@ -162,11 +173,15 @@ export interface OrderItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  gstRate?: number;
+  gstAmount?: number;
   snapshot: {
     name: string;
     brand: string;
     sku?: string;
     image?: string;
+    gstRate?: number;
+    gstAmount?: number;
   };
 }
 

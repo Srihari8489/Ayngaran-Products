@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { MapCategoryAttributeDto } from './dto/map-category-attribute.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class CategoriesService {
@@ -150,14 +151,52 @@ export class CategoriesService {
   // CRUD OPERATIONS
   // -------------------------------------------------------------
 
-  async findAll() {
-    return this.prisma.client.category.findMany({
-      include: {
-        parent: { select: { id: true, name: true, categoryCode: true } },
-        _count: { select: { products: true, children: true } },
-      },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
+  async findAll(query?: any) {
+    if (!query || (!query.page && !query.limit && !query.search && !query.status)) {
+      return this.prisma.client.category.findMany({
+        include: {
+          parent: { select: { id: true, name: true, categoryCode: true } },
+          _count: { select: { products: true, children: true } },
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      });
+    }
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (query.status && query.status !== 'ALL') {
+      where.isActive = query.status === 'ACTIVE';
+    }
+
+    const searchTerm = (query.search || '').trim();
+    if (searchTerm) {
+      where.OR = [
+        { name: { contains: searchTerm } },
+        { categoryCode: { contains: searchTerm } },
+        { slug: { contains: searchTerm } },
+        { description: { contains: searchTerm } },
+      ];
+    }
+
+    const [total, categories] = await Promise.all([
+      this.prisma.client.category.count({ where }),
+      this.prisma.client.category.findMany({
+        where,
+        include: {
+          parent: { select: { id: true, name: true, categoryCode: true } },
+          _count: { select: { products: true, children: true } },
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return createPaginatedResponse(categories, total, page, limit);
   }
 
   async findOne(id: number) {
@@ -230,6 +269,7 @@ export class CategoriesService {
         image: dto.image || null,
         parentId: dto.parentId || null,
         sortOrder: dto.sortOrder || 0,
+        gstRate: dto.gstRate !== undefined ? dto.gstRate : 5.0,
         isActive: dto.isActive !== undefined ? dto.isActive : true,
       },
     });
@@ -265,6 +305,7 @@ export class CategoriesService {
         image: dto.image,
         parentId: dto.parentId !== undefined ? dto.parentId : existing.parentId,
         sortOrder: dto.sortOrder !== undefined ? dto.sortOrder : existing.sortOrder,
+        gstRate: dto.gstRate !== undefined ? dto.gstRate : undefined,
         isActive: dto.isActive !== undefined ? dto.isActive : existing.isActive,
       },
     });

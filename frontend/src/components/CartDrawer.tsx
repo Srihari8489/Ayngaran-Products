@@ -19,25 +19,37 @@ export const CartDrawer: React.FC = () => {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.6)',
-        backdropFilter: 'blur(4px)',
-        zIndex: 90,
-        display: 'flex',
-        justifyContent: 'flex-end',
-        animation: 'fadeIn 0.2s ease',
+        zIndex: 999990,
       }}
-      onClick={(e) => e.target === e.currentTarget && closeCart()}
     >
+      {/* Backdrop */}
       <div
         style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.6)',
+          backdropFilter: 'blur(4px)',
+          animation: 'drawerFadeIn 0.2s ease-out forwards',
+        }}
+        onClick={closeCart}
+      />
+
+      {/* Slide-out Drawer Panel strictly anchored to the right */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
           width: '100%',
           maxWidth: '440px',
-          backgroundColor: '#ffffff',
           height: '100%',
-          boxShadow: 'var(--shadow-xl)',
+          backgroundColor: '#ffffff',
+          boxShadow: '-8px 0 35px rgba(0, 0, 0, 0.25)',
           display: 'flex',
           flexDirection: 'column',
-          position: 'relative',
+          zIndex: 1,
+          animation: 'drawerSlideFromRight 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards',
         }}
       >
         {/* Header */}
@@ -63,13 +75,13 @@ export const CartDrawer: React.FC = () => {
         </div>
 
         {/* Free Shipping Meter */}
-        <div style={{ padding: '0.75rem 1.5rem', backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border-color)', fontSize: '0.82rem' }}>
+        {/* <div style={{ padding: '0.75rem 1.5rem', backgroundColor: '#f8fafc', borderBottom: '1px solid var(--border-color)', fontSize: '0.82rem' }}>
           {(cart?.subtotal || 0) >= 1000 ? (
             <span style={{ color: 'var(--success)', fontWeight: 600 }}>🎉 You qualify for FREE Delivery!</span>
           ) : (
             <span>Add <strong>₹{1000 - (cart?.subtotal || 0)}</strong> more to get <strong>FREE Express Delivery</strong>!</span>
           )}
-        </div>
+        </div> */}
 
         {/* Items List */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem' }}>
@@ -139,36 +151,46 @@ export const CartDrawer: React.FC = () => {
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                      <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                        ₹{item.totalPrice.toLocaleString()}
-                      </span>
-
+                    {/* Item Price Calculation Row (Single Price x Qty = Total) */}
+                    <div style={{ marginTop: '0.65rem', paddingTop: '0.55rem', borderTop: '1px dashed #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       {/* Quantity Controls */}
                       <div
                         style={{
                           display: 'flex',
                           alignItems: 'center',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '0.4rem',
+                          border: '1.5px solid #cbd5e1',
+                          borderRadius: '0.5rem',
                           overflow: 'hidden',
+                          background: '#ffffff',
                         }}
                       >
                         <button
                           onClick={() => updateQuantity(item.id, Math.max(1, item.quantity - 1))}
-                          style={{ padding: '0.25rem 0.5rem', background: '#f8fafc' }}
+                          style={{ padding: '0.3rem 0.55rem', background: '#f8fafc', borderRight: '1px solid #e2e8f0', cursor: 'pointer' }}
+                          title="Decrease quantity"
                         >
-                          <Minus size={13} />
+                          <Minus size={12} color="#334155" />
                         </button>
-                        <span style={{ padding: '0.25rem 0.65rem', fontSize: '0.85rem', fontWeight: 600 }}>
+                        <span style={{ padding: '0.3rem 0.75rem', fontSize: '0.85rem', fontWeight: 800, color: '#1a3d2b' }}>
                           {item.quantity}
                         </span>
                         <button
                           onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          style={{ padding: '0.25rem 0.5rem', background: '#f8fafc' }}
+                          style={{ padding: '0.3rem 0.55rem', background: '#f8fafc', borderLeft: '1px solid #e2e8f0', cursor: 'pointer' }}
+                          title="Increase quantity"
                         >
-                          <Plus size={13} />
+                          <Plus size={12} color="#334155" />
                         </button>
+                      </div>
+
+                      {/* Formula & Total Calculation */}
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 700 }}>
+                          ₹{item.unitPrice.toLocaleString()} × {item.quantity}
+                        </div>
+                        <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1a3d2b' }}>
+                          = ₹{item.totalPrice.toLocaleString()}
+                        </div>
                       </div>
                     </div>
                   </div>

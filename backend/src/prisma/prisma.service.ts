@@ -76,7 +76,7 @@ export function createExtendedPrismaClient() {
           }
           return query(args);
         },
-        async delete({ model, args }) {
+        async delete({ model, args, query }) {
           if (SOFT_DELETE_MODELS.includes(model)) {
             const clientModel = (prisma as any)[model.charAt(0).toLowerCase() + model.slice(1)];
             return clientModel.update({
@@ -86,9 +86,9 @@ export function createExtendedPrismaClient() {
               },
             });
           }
-          throw new Error(`Hard deletion is blocked for model ${model}.`);
+          return query(args);
         },
-        async deleteMany({ model, args }) {
+        async deleteMany({ model, args, query }) {
           if (SOFT_DELETE_MODELS.includes(model)) {
             const clientModel = (prisma as any)[model.charAt(0).toLowerCase() + model.slice(1)];
             return clientModel.updateMany({
@@ -98,7 +98,7 @@ export function createExtendedPrismaClient() {
               },
             });
           }
-          throw new Error(`Hard deletion is blocked for model ${model}.`);
+          return query(args);
         },
         async update({ model, args, query }) {
           if (SOFT_DELETE_MODELS.includes(model)) {

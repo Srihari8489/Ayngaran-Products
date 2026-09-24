@@ -19,6 +19,7 @@ export class CartService {
             product: {
               include: {
                 brand: { select: { id: true, name: true } },
+                category: { select: { id: true, name: true, gstRate: true } },
                 images: { where: { isPrimary: true }, take: 1 },
               },
             },
@@ -46,6 +47,7 @@ export class CartService {
               product: {
                 include: {
                   brand: { select: { id: true, name: true } },
+                  category: { select: { id: true, name: true, gstRate: true } },
                   images: { where: { isPrimary: true }, take: 1 },
                 },
               },
@@ -66,6 +68,7 @@ export class CartService {
     }
 
     let subtotal = 0;
+    let taxAmount = 0;
     let totalItems = 0;
     let allItemsAvailable = true;
 
@@ -77,7 +80,14 @@ export class CartService {
 
       if (!isAvailable) allItemsAvailable = false;
 
+      const categoryGst = Number(item.product.category?.gstRate ?? 5);
+      const effectiveGstRate = item.product.useCategoryGst
+        ? categoryGst
+        : (item.product.gstRate !== null && item.product.gstRate !== undefined ? Number(item.product.gstRate) : categoryGst);
+      const itemGstAmount = Math.round(totalPrice * (effectiveGstRate / 100) * 100) / 100;
+
       subtotal += totalPrice;
+      taxAmount += itemGstAmount;
       totalItems += item.quantity;
 
       const variantName = item.variant?.variantValues
@@ -97,6 +107,8 @@ export class CartService {
         quantity: item.quantity,
         unitPrice,
         totalPrice,
+        gstRate: effectiveGstRate,
+        gstAmount: itemGstAmount,
         currentStock,
         isAvailable,
         stockWarning:
@@ -113,6 +125,7 @@ export class CartService {
       items,
       totalItems,
       subtotal,
+      taxAmount: Math.round(taxAmount * 100) / 100,
       allItemsAvailable,
     };
   }

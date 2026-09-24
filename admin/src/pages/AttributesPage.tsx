@@ -11,10 +11,27 @@ import {
   ChevronRight
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { Attribute, AttributeValue } from '../types';
+import { Attribute, AttributeValue, PaginationMeta } from '../types';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { Search } from 'lucide-react';
+import { AdminModal } from '../components/AdminModal';
 
 export const AttributesPage: React.FC = () => {
   const [attributes, setAttributes] = useState<Attribute[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [dataTypeFilter, setDataTypeFilter] = useState('ALL');
   const [selectedAttribute, setSelectedAttribute] = useState<Attribute | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -57,13 +74,23 @@ export const AttributesPage: React.FC = () => {
   const fetchAttributes = async () => {
     try {
       setLoading(true);
-      const res: any = await adminApi.get('/attributes');
-      const data = res.data || res || [];
-      setAttributes(data);
-      if (data.length > 0 && !selectedAttribute) {
-        setSelectedAttribute(data[0]);
+      const params = new URLSearchParams();
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (dataTypeFilter !== 'ALL') params.append('dataType', dataTypeFilter);
+
+      const res: any = await adminApi.get(`/attributes?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setAttributes(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setPagination(res.pagination);
+      }
+
+      if (items.length > 0 && !selectedAttribute) {
+        setSelectedAttribute(items[0]);
       } else if (selectedAttribute) {
-        const updated = data.find((a: Attribute) => a.id === selectedAttribute.id);
+        const updated = items.find((a: Attribute) => a.id === selectedAttribute.id);
         if (updated) setSelectedAttribute(updated);
       }
     } catch (err) {
@@ -74,8 +101,12 @@ export const AttributesPage: React.FC = () => {
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, dataTypeFilter]);
+
+  useEffect(() => {
     fetchAttributes();
-  }, []);
+  }, [page, limit, debouncedSearch, dataTypeFilter]);
 
   const handleCreateAttribute = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +232,55 @@ export const AttributesPage: React.FC = () => {
         <div className="glass-card" style={{ padding: '1.5rem', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-color)' }}>
             <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0f172a' }}>Specifications List</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{attributes.length} Definitions</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{pagination.total} Definitions</span>
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: '150px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                className="form-input"
+                style={{ paddingLeft: '2.2rem', paddingRight: search ? '1.8rem' : '0.6rem', fontSize: '0.8rem', height: '2.2rem' }}
+                placeholder="Search specs..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '0.5rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0.15rem',
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            <select
+              className="form-select"
+              value={dataTypeFilter}
+              onChange={(e) => setDataTypeFilter(e.target.value)}
+              style={{ width: '130px', height: '2.2rem', fontSize: '0.8rem' }}
+            >
+              <option value="ALL">All Types</option>
+              <option value="SINGLE_SELECT">Select</option>
+              <option value="MULTI_SELECT">Multi Select</option>
+              <option value="TEXT">Text</option>
+              <option value="NUMBER">Number</option>
+              <option value="BOOLEAN">Boolean</option>
+            </select>
           </div>
 
           <div style={{ overflowX: 'auto' }}>
@@ -306,6 +385,12 @@ export const AttributesPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          <Pagination
+            pagination={pagination}
+            onPageChange={setPage}
+            onLimitChange={setLimit}
+            loading={loading}
+          />
         </div>
 
         {/* Right Column: Predefined Options for Selected Attribute */}
@@ -425,389 +510,316 @@ export const AttributesPage: React.FC = () => {
       </div>
 
       {/* Create Attribute Modal */}
-      {isCreateModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '28rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Add Specification
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Attribute Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={attrForm.name}
-                  onChange={(e) => {
-                    const name = e.target.value;
-                    setAttrForm({
-                      ...attrForm,
-                      name,
-                      slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                    });
-                  }}
-                  placeholder="e.g. Battery Capacity"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Slug (Unique Key) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={attrForm.slug}
-                  onChange={(e) => setAttrForm({ ...attrForm, slug: e.target.value })}
-                  placeholder="e.g. battery-capacity"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Data Type *
-                </label>
-                <select
-                  className="form-select"
-                  value={attrForm.dataType}
-                  onChange={(e) => setAttrForm({ ...attrForm, dataType: e.target.value as any })}
-                >
-                  <option value="SINGLE_SELECT">SINGLE_SELECT (Pill / Option Choice)</option>
-                  <option value="MULTI_SELECT">MULTI_SELECT (Checkboxes)</option>
-                  <option value="TEXT">TEXT (Freeform String)</option>
-                  <option value="NUMBER">NUMBER (Numeric specification)</option>
-                  <option value="BOOLEAN">BOOLEAN (True / False toggle)</option>
-                  <option value="RANGE">RANGE (Numeric range)</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Unit of Measurement (Optional)
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={attrForm.unit}
-                  onChange={(e) => setAttrForm({ ...attrForm, unit: e.target.value })}
-                  placeholder="e.g. mAh, GB, inch, kg"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Attribute
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Add Specification"
+        subtitle="Define a new reusable product attribute or specification"
+        maxWidth="30rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleCreateAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Attribute Name *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={attrForm.name}
+              onChange={(e) => {
+                const name = e.target.value;
+                setAttrForm({
+                  ...attrForm,
+                  name,
+                  slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                });
+              }}
+              placeholder="e.g. Battery Capacity"
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Slug (Unique Key) *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={attrForm.slug}
+              onChange={(e) => setAttrForm({ ...attrForm, slug: e.target.value })}
+              placeholder="e.g. battery-capacity"
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Data Type *
+            </label>
+            <select
+              className="form-select"
+              value={attrForm.dataType}
+              onChange={(e) => setAttrForm({ ...attrForm, dataType: e.target.value as any })}
+            >
+              <option value="SINGLE_SELECT">SINGLE_SELECT (Pill / Option Choice)</option>
+              <option value="MULTI_SELECT">MULTI_SELECT (Checkboxes)</option>
+              <option value="TEXT">TEXT (Freeform String)</option>
+              <option value="NUMBER">NUMBER (Numeric specification)</option>
+              <option value="BOOLEAN">BOOLEAN (True / False toggle)</option>
+              <option value="RANGE">RANGE (Numeric range)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Unit of Measurement (Optional)
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={attrForm.unit}
+              onChange={(e) => setAttrForm({ ...attrForm, unit: e.target.value })}
+              placeholder="e.g. mAh, GB, inch, kg"
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Attribute
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Add Value Modal */}
-      {isAddValueModalOpen && selectedAttribute && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '28rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' }}>
-              Add Option
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              For specification: <strong style={{ color: '#0f172a' }}>{selectedAttribute.name}</strong>
-            </p>
-
-            <form onSubmit={handleAddValue} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Display Label *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={valueForm.displayName}
-                  onChange={(e) => {
-                    const disp = e.target.value;
-                    setValueForm({
-                      ...valueForm,
-                      displayName: disp,
-                      value: disp.trim(),
-                    });
-                  }}
-                  placeholder="e.g. 128 GB or Titanium Blue"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Internal Value (Stored Key) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={valueForm.value}
-                  onChange={(e) => setValueForm({ ...valueForm, value: e.target.value })}
-                  placeholder="e.g. 128GB or titanium_blue"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Sort Order
-                </label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={valueForm.sortOrder}
-                  onChange={(e) => setValueForm({ ...valueForm, sortOrder: Number(e.target.value) })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsAddValueModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Add Option
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isAddValueModalOpen && !!selectedAttribute}
+        onClose={() => setIsAddValueModalOpen(false)}
+        title="Add Option"
+        subtitle={
+          <span>
+            For specification: <strong style={{ color: '#0f172a' }}>{selectedAttribute?.name}</strong>
+          </span>
+        }
+        maxWidth="30rem"
+      >
+        <form onSubmit={handleAddValue} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Display Label *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={valueForm.displayName}
+              onChange={(e) => {
+                const disp = e.target.value;
+                setValueForm({
+                  ...valueForm,
+                  displayName: disp,
+                  value: disp.trim(),
+                });
+              }}
+              placeholder="e.g. 128 GB or Titanium Blue"
+            />
           </div>
-        </div>
-      )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Internal Value (Stored Key) *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={valueForm.value}
+              onChange={(e) => setValueForm({ ...valueForm, value: e.target.value })}
+              placeholder="e.g. 128GB or titanium_blue"
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Sort Order
+            </label>
+            <input
+              type="number"
+              className="form-input"
+              value={valueForm.sortOrder}
+              onChange={(e) => setValueForm({ ...valueForm, sortOrder: Number(e.target.value) })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsAddValueModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Add Option
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Edit Attribute Modal */}
-      {isEditAttrModalOpen && editingAttr && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-card" style={{ width: '100%', maxWidth: '440px', padding: '1.75rem', backgroundColor: '#ffffff' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>Edit Specification</h3>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Code: <span style={{ fontFamily: 'var(--font-mono)' }}>{editingAttr.slug}</span> ({editingAttr.dataType})
-                </p>
-              </div>
-              <button
-                onClick={() => setIsEditAttrModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {formError && (
-              <div style={{ padding: '0.75rem', borderRadius: '0.5rem', backgroundColor: 'rgba(244,63,94,0.1)', color: '#e11d48', fontSize: '0.82rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleUpdateAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Specification Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={editAttrForm.name}
-                  onChange={(e) => setEditAttrForm({ ...editAttrForm, name: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Measurement Unit (Optional)
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={editAttrForm.unit}
-                  onChange={(e) => setEditAttrForm({ ...editAttrForm, unit: e.target.value })}
-                  placeholder="e.g. g, kg, ml, L, pcs"
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <input
-                  type="checkbox"
-                  id="attrIsActive"
-                  checked={editAttrForm.isActive}
-                  onChange={(e) => setEditAttrForm({ ...editAttrForm, isActive: e.target.checked })}
-                  style={{ width: '16px', height: '16px', accentColor: 'var(--accent-amber)' }}
-                />
-                <label htmlFor="attrIsActive" style={{ fontSize: '0.85rem', color: '#0f172a', fontWeight: 500, cursor: 'pointer' }}>
-                  Active in store and filter panels
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditAttrModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditAttrModalOpen && !!editingAttr}
+        onClose={() => setIsEditAttrModalOpen(false)}
+        title="Edit Specification"
+        subtitle={
+          <span>
+            Code: <span style={{ fontFamily: 'var(--font-mono)' }}>{editingAttr?.slug}</span> ({editingAttr?.dataType})
+          </span>
+        }
+        maxWidth="30rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.75rem', borderRadius: '0.5rem', backgroundColor: 'rgba(244,63,94,0.1)', color: '#e11d48', fontSize: '0.82rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleUpdateAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Specification Name *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={editAttrForm.name}
+              onChange={(e) => setEditAttrForm({ ...editAttrForm, name: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Measurement Unit (Optional)
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={editAttrForm.unit}
+              onChange={(e) => setEditAttrForm({ ...editAttrForm, unit: e.target.value })}
+              placeholder="e.g. g, kg, ml, L, pcs"
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <input
+              type="checkbox"
+              id="attrIsActive"
+              checked={editAttrForm.isActive}
+              onChange={(e) => setEditAttrForm({ ...editAttrForm, isActive: e.target.checked })}
+              style={{ width: '16px', height: '16px', accentColor: 'var(--accent-amber)' }}
+            />
+            <label htmlFor="attrIsActive" style={{ fontSize: '0.85rem', color: '#0f172a', fontWeight: 500, cursor: 'pointer' }}>
+              Active in store and filter panels
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditAttrModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Edit Attribute Value Modal */}
-      {isEditValueModalOpen && editingValue && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-card" style={{ width: '100%', maxWidth: '440px', padding: '1.75rem', backgroundColor: '#ffffff' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>Edit Option Value</h3>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Update option pill display name and internal identifier
-                </p>
-              </div>
-              <button
-                onClick={() => setIsEditValueModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateValue} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Display Name (Customer Facing) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={editValueForm.displayName}
-                  onChange={(e) => setEditValueForm({ ...editValueForm, displayName: e.target.value })}
-                  placeholder="e.g. 100 g or 1 Kg"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Internal Value (Code/Slug) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={editValueForm.value}
-                  onChange={(e) => setEditValueForm({ ...editValueForm, value: e.target.value })}
-                  placeholder="e.g. 100g or 1kg"
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Sort Order
-                </label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={editValueForm.sortOrder}
-                  onChange={(e) => setEditValueForm({ ...editValueForm, sortOrder: Number(e.target.value) })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditValueModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditValueModalOpen && !!editingValue}
+        onClose={() => setIsEditValueModalOpen(false)}
+        title="Edit Option Value"
+        subtitle="Update option pill display name and internal identifier"
+        maxWidth="30rem"
+      >
+        <form onSubmit={handleUpdateValue} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Display Name (Customer Facing) *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={editValueForm.displayName}
+              onChange={(e) => setEditValueForm({ ...editValueForm, displayName: e.target.value })}
+              placeholder="e.g. 100 g or 1 Kg"
+            />
           </div>
-        </div>
-      )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Internal Value (Code/Slug) *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={editValueForm.value}
+              onChange={(e) => setEditValueForm({ ...editValueForm, value: e.target.value })}
+              placeholder="e.g. 100g or 1kg"
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Sort Order
+            </label>
+            <input
+              type="number"
+              className="form-input"
+              value={editValueForm.sortOrder}
+              onChange={(e) => setEditValueForm({ ...editValueForm, sortOrder: Number(e.target.value) })}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditValueModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };

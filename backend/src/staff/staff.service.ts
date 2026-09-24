@@ -7,29 +7,83 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class StaffService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    const staffList = await this.prisma.client.staff.findMany({
-      include: {
-        role: {
-          include: {
-            permissions: {
-              include: {
-                permission: true,
-              },
+  async findAll(query?: any) {
+    const isPaginated = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.roleId !== undefined || query.status !== undefined);
+    const page = Math.max(1, parseInt(query?.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(query?.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query?.status === 'ACTIVE') where.isActive = true;
+    else if (query?.status === 'INACTIVE') where.isActive = false;
+
+    if (query?.roleId && query.roleId !== 'ALL') {
+      const rId = parseInt(query.roleId as string, 10);
+      if (!isNaN(rId)) where.roleId = rId;
+    }
+
+    if (query?.search) {
+      const s = String(query.search).trim();
+      where.OR = [
+        { name: { contains: s } },
+        { email: { contains: s } },
+        { phone: { contains: s } },
+        { staffCode: { contains: s } },
+      ];
+    }
+
+    const include = {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
             },
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
-    });
+    };
 
-    return staffList.map((s) => ({
+    if (!isPaginated) {
+      const staffList = await this.prisma.client.staff.findMany({
+        where,
+        include,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return staffList.map((s) => ({
+        id: s.id,
+        staffCode: s.staffCode,
+        name: s.name,
+        email: s.email,
+        phone: s.phone,
+        isActive: s.isActive,
+        role: s.role.name,
+        roleId: s.role.id,
+        permissions: s.role.permissions.map((p) => p.permission.code),
+        createdAt: s.createdAt,
+      }));
+    }
+
+    const [staffList, total] = await Promise.all([
+      this.prisma.client.staff.findMany({
+        where,
+        skip,
+        take: limit,
+        include,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.client.staff.count({ where }),
+    ]);
+
+    const items = staffList.map((s) => ({
       id: s.id,
       staffCode: s.staffCode,
       name: s.name,
@@ -41,6 +95,8 @@ export class StaffService {
       permissions: s.role.permissions.map((p) => p.permission.code),
       createdAt: s.createdAt,
     }));
+
+    return createPaginatedResponse(items, total, page, limit);
   }
 
   async findOne(id: number) {

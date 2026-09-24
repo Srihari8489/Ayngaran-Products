@@ -165,7 +165,7 @@ export class ReportsService {
       },
     });
 
-    const categoryMap = new Map<string, { categoryId: number; name: string; itemsSold: number; totalRevenue: number }>();
+    const categoryMap = new Map<string, { categoryId: number; name: string; itemsSold: number; unitsSold: number; totalRevenue: number; revenue: number }>();
 
     for (const item of orderItems) {
       const cat = item.product.category;
@@ -174,13 +174,17 @@ export class ReportsService {
           categoryId: cat.id,
           name: cat.name,
           itemsSold: 0,
+          unitsSold: 0,
           totalRevenue: 0,
+          revenue: 0,
         });
       }
 
       const entry = categoryMap.get(cat.categoryCode)!;
       entry.itemsSold += item.quantity;
+      entry.unitsSold += item.quantity;
       entry.totalRevenue += Number(item.totalPrice);
+      entry.revenue += Number(item.totalPrice);
     }
 
     return Array.from(categoryMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);
@@ -198,7 +202,7 @@ export class ReportsService {
       },
     });
 
-    const brandMap = new Map<string, { brandId: number; name: string; itemsSold: number; totalRevenue: number }>();
+    const brandMap = new Map<string, { brandId: number; name: string; itemsSold: number; unitsSold: number; totalRevenue: number; revenue: number }>();
 
     for (const item of orderItems) {
       const brand = item.product.brand;
@@ -207,13 +211,17 @@ export class ReportsService {
           brandId: brand.id,
           name: brand.name,
           itemsSold: 0,
+          unitsSold: 0,
           totalRevenue: 0,
+          revenue: 0,
         });
       }
 
       const entry = brandMap.get(brand.brandCode)!;
       entry.itemsSold += item.quantity;
+      entry.unitsSold += item.quantity;
       entry.totalRevenue += Number(item.totalPrice);
+      entry.revenue += Number(item.totalPrice);
     }
 
     return Array.from(brandMap.values()).sort((a, b) => b.totalRevenue - a.totalRevenue);

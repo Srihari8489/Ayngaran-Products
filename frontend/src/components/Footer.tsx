@@ -1,108 +1,162 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Truck, RotateCcw, Headphones, ShoppingBag } from 'lucide-react';
+import api from '../api/client';
 
 export const Footer: React.FC = () => {
+  const [email, setEmail] = useState('');
+  const [subscribed, setSubscribed] = useState(false);
+  const [subscribeLoading, setSubscribeLoading] = useState(false);
+  const [subscribeMsg, setSubscribeMsg] = useState('');
+
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSubscribeLoading(true);
+    setSubscribeMsg('');
+
+    try {
+      const res: any = await api.post('/newsletter/subscribe', { email: email.trim() });
+      setSubscribed(true);
+      setSubscribeMsg(res?.message || 'Joined! ✓');
+      setEmail('');
+      setTimeout(() => {
+        setSubscribed(false);
+        setSubscribeMsg('');
+      }, 5000);
+    } catch (err: any) {
+      setSubscribeMsg(err.response?.data?.message || 'Failed to subscribe. Please try again.');
+      setTimeout(() => setSubscribeMsg(''), 4000);
+    } finally {
+      setSubscribeLoading(false);
+    }
+  };
+
   return (
-    <footer style={{ backgroundColor: '#0f172a', color: '#f8fafc', marginTop: '5rem', borderTop: '1px solid #1e293b' }}>
-      {/* Value Proposition Bar */}
-      <div style={{ borderBottom: '1px solid #1e293b', padding: '2.5rem 0' }}>
-        <div className="container" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '2rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ padding: '0.85rem', borderRadius: '0.75rem', background: 'rgba(99, 102, 241, 0.1)', color: '#818cf8' }}>
-              <Truck size={24} />
+    <footer style={{ backgroundColor: '#0b281b', color: '#e2e8f0', marginTop: '4rem', borderTop: '2px solid rgba(212, 197, 106, 0.3)' }}>
+      <div className="container" style={{ padding: '4rem 1.5rem 2.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '3rem', marginBottom: '3rem' }}>
+
+          {/* Brand Tagline Column */}
+          <div style={{ maxWidth: '320px' }}>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <img
+                src="/Ayngaran_logo.png"
+                alt="Ayngaran Logo"
+                style={{ height: '6rem', width: 'auto', objectFit: 'contain' }}
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = 'none';
+                }}
+              />
             </div>
-            <div>
-              <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '0.2rem' }}>Free Express Delivery</h4>
-              <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>On all orders above ₹999 across India</p>
-            </div>
+            <p style={{ fontSize: '0.88rem', lineHeight: 1.6, color: '#cbd5e1' }}>
+              Bringing the wisdom of Tamil traditional foods to modern healthy living. 100% natural, no preservatives, homemade quality.
+            </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ padding: '0.85rem', borderRadius: '0.75rem', background: 'rgba(16, 185, 129, 0.1)', color: '#34d399' }}>
-              <ShieldCheck size={24} />
-            </div>
-            <div>
-              <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '0.2rem' }}>100% Genuine Products</h4>
-              <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Brand authorized warranty & verified specs</p>
-            </div>
+          {/* Quick Links Column */}
+          <div>
+            <h4 style={{ fontSize: '0.95rem', color: '#d4af37', marginBottom: '1.25rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              QUICK LINKS
+            </h4>
+            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem', color: '#cbd5e1' }}>
+              <li><Link to="/" style={{ transition: 'color 0.15s' }}>Home</Link></li>
+              <li><Link to="/catalog" style={{ transition: 'color 0.15s' }}>Our Products</Link></li>
+              <li><Link to="/about" style={{ transition: 'color 0.15s' }}>About Us</Link></li>
+              <li><Link to="/contact" style={{ transition: 'color 0.15s' }}>Contact Us</Link></li>
+              <li><Link to="/feedback" style={{ transition: 'color 0.15s' }}>Feedback</Link></li>
+            </ul>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ padding: '0.85rem', borderRadius: '0.75rem', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24' }}>
-              <RotateCcw size={24} />
-            </div>
-            <div>
-              <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '0.2rem' }}>Easy 7-Day Returns</h4>
-              <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Hassle-free replacement guarantee</p>
-            </div>
+          {/* Help Column */}
+          <div>
+            <h4 style={{ fontSize: '0.95rem', color: '#d4af37', marginBottom: '1.25rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              HELP
+            </h4>
+            <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.9rem', color: '#cbd5e1' }}>
+              <li><Link to="/shipping-policy" style={{ transition: 'color 0.15s' }}>Shipping Policy</Link></li>
+              <li><Link to="/return-policy" style={{ transition: 'color 0.15s' }}>Return Policy</Link></li>
+              <li><Link to="/privacy-policy" style={{ transition: 'color 0.15s' }}>Privacy Policy</Link></li>
+              <li><Link to="/terms-of-service" style={{ transition: 'color 0.15s' }}>Terms of Service</Link></li>
+              <li><Link to="/track-order" style={{ transition: 'color 0.15s' }}>Track Your Order</Link></li>
+              <li><Link to="/faq" style={{ transition: 'color 0.15s' }}>FAQ</Link></li>
+            </ul>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div style={{ padding: '0.85rem', borderRadius: '0.75rem', background: 'rgba(236, 72, 153, 0.1)', color: '#f472b6' }}>
-              <Headphones size={24} />
-            </div>
-            <div>
-              <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '0.2rem' }}>Dedicated Support</h4>
-              <p style={{ fontSize: '0.8rem', color: '#94a3b8' }}>24/7 technical customer support</p>
-            </div>
+          {/* Newsletter Column */}
+          <div style={{ maxWidth: '340px' }}>
+            <h4 style={{ fontSize: '0.95rem', color: '#d4af37', marginBottom: '1.25rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              NEWSLETTER
+            </h4>
+            <p style={{ fontSize: '0.88rem', color: '#cbd5e1', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+              Subscribe for exclusive offers and new product alerts!
+            </p>
+
+            <form onSubmit={handleSubscribe} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <input
+                  type="email"
+                  required
+                  placeholder="Your email"
+                  value={email}
+                  disabled={subscribeLoading}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: '160px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '0.5rem',
+                    padding: '0.65rem 0.9rem',
+                    color: '#ffffff',
+                    fontSize: '0.88rem',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={subscribeLoading}
+                  style={{
+                    backgroundColor: subscribed ? '#22c55e' : '#f59e0b',
+                    color: subscribed ? '#ffffff' : '#0b281b',
+                    fontWeight: 800,
+                    fontSize: '0.88rem',
+                    padding: '0.65rem 1.25rem',
+                    borderRadius: '0.5rem',
+                    border: 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)',
+                    opacity: subscribeLoading ? 0.7 : 1,
+                  }}
+                >
+                  {subscribeLoading ? 'Joining...' : subscribed ? 'Joined! ✓' : 'Subscribe'}
+                </button>
+              </div>
+
+              {subscribeMsg && (
+                <div style={{ fontSize: '0.8rem', color: subscribed ? '#86efac' : '#fca5a5', marginTop: '2px', fontWeight: 600 }}>
+                  {subscribeMsg}
+                </div>
+              )}
+            </form>
+          </div>
+
+        </div>
+
+        {/* Bottom Bar Divider */}
+        <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '1.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', fontSize: '0.85rem', color: '#94a3b8' }}>
+          <div>
+            © {new Date().getFullYear()} Ayngaran. All rights reserved.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            Made with <span style={{ color: '#22c55e' }}>💚</span> in Tamil Nadu, India
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#cbd5e1' }}>
+            <span>🔒</span> Secure Shopping
           </div>
         </div>
-      </div>
-
-      {/* Main Footer Links */}
-      <div className="container" style={{ padding: '4rem 1.5rem 3rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '3rem' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1.25rem' }}>
-            <div style={{ width: '2rem', height: '2rem', borderRadius: '0.5rem', background: 'var(--primary-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
-              <ShoppingBag size={16} />
-            </div>
-            <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>AYNGARAN</span>
-          </div>
-          <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6, marginBottom: '1rem' }}>
-            Ayngaran Products is a modern full-stack e-commerce experience offering cutting-edge electronics, dynamic catalog navigation, and secure authoritative checkout.
-          </p>
-          <p style={{ fontSize: '0.8rem', color: '#64748b' }}>
-            Coimbatore, Tamil Nadu, India.
-          </p>
-        </div>
-
-        <div>
-          <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '1.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Explore</h4>
-          <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#94a3b8' }}>
-            <li><Link to="/catalog">All Products</Link></li>
-            <li><Link to="/catalog?categoryId=1">Electronics</Link></li>
-            <li><Link to="/catalog?categoryId=2">Smartphones</Link></li>
-            <li><Link to="/catalog?categoryId=5">Laptops</Link></li>
-          </ul>
-        </div>
-
-        <div>
-          <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '1.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Account</h4>
-          <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.88rem', color: '#94a3b8' }}>
-            <li><Link to="/orders">My Orders</Link></li>
-            <li><Link to="/orders">Order Tracking</Link></li>
-            <li><a href="http://localhost:3001" target="_blank" rel="noreferrer" style={{ color: '#818cf8', fontWeight: 600 }}>Staff Admin Panel →</a></li>
-          </ul>
-        </div>
-
-        <div>
-          <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '1.25rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Payment & Security</h4>
-          <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.6, marginBottom: '1rem' }}>
-            Authoritative server-side payment verification powered by encrypted gateway integrations.
-          </p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #334155' }}>UPI</span>
-            <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #334155' }}>Credit Cards</span>
-            <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #334155' }}>NetBanking</span>
-            <span className="badge" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #334155' }}>COD</span>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ borderTop: '1px solid #1e293b', padding: '1.5rem 0', textAlign: 'center', fontSize: '0.8rem', color: '#64748b' }}>
-        © {new Date().getFullYear()} Ayngaran Products. All rights reserved. Built with React, NestJS, Prisma & MySQL.
       </div>
     </footer>
   );
 };
+

@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -23,8 +24,8 @@ export class DeliveryController {
 
   @RequirePermissions('DELIVERY_MANAGE')
   @Get()
-  async findAll() {
-    return this.deliveryService.findAll();
+  async findAll(@Query() query?: any) {
+    return this.deliveryService.findAll(query);
   }
 
   @RequirePermissions('DELIVERY_MANAGE')

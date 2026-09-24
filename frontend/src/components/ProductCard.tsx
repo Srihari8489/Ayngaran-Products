@@ -1,8 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Star, ShoppingBag, ArrowRight } from 'lucide-react';
+import { Star, ShoppingBag, ArrowRight, Heart } from 'lucide-react';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
+import { useWishlist } from '../context/WishlistContext';
 
 interface ProductCardProps {
   product: Product;
@@ -10,6 +11,8 @@ interface ProductCardProps {
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { addToCart } = useCart();
+  const { isInWishlist, toggleWishlist } = useWishlist();
+  const isLiked = isInWishlist(product.id);
 
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -18,6 +21,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     addToCart(product.id, primaryVariant?.id, 1).catch((err) => {
       alert(err.message);
     });
+  };
+
+  const handleWishlistClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleWishlist(product);
   };
 
   const imageSrc =
@@ -73,6 +82,43 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             Only {product.totalStock} Left
           </span>
         )}
+
+        {/* Wishlist Heart Button */}
+        <button
+          type="button"
+          onClick={handleWishlistClick}
+          aria-label={isLiked ? "Remove from wishlist" : "Add to wishlist"}
+          style={{
+            position: 'absolute',
+            top: '0.75rem',
+            right: '0.75rem',
+            width: '34px',
+            height: '34px',
+            borderRadius: '50%',
+            backgroundColor: isLiked ? '#ffffff' : 'rgba(255, 255, 255, 0.92)',
+            border: isLiked ? '1.5px solid #fecaca' : '1px solid rgba(0, 0, 0, 0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 4,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)';
+          }}
+        >
+          <Heart
+            size={18}
+            fill={isLiked ? '#ef4444' : 'none'}
+            color={isLiked ? '#ef4444' : '#64748b'}
+            style={{ transition: 'all 0.15s ease' }}
+          />
+        </button>
 
         {/* Brand Badge */}
         <span

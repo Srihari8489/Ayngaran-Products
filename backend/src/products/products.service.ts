@@ -8,6 +8,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class ProductsService {
@@ -167,12 +168,18 @@ export class ProductsService {
 
   async findAll(query: QueryProductsDto) {
     const page = Math.max(1, Number(query.page) || 1);
-    const limit = Math.max(1, Math.min(100, Number(query.limit) || 12));
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const where: any = {
-      status: 'ACTIVE',
-    };
+    const where: any = {};
+
+    // Status filter
+    if (query.status && query.status !== 'ALL') {
+      where.status = query.status;
+    } else if (!query.status) {
+      // Default to ACTIVE for customer catalog if not explicitly set
+      where.status = 'ACTIVE';
+    }
 
     // 1. Category Filter (including subcategories)
     if (query.categoryId) {
@@ -181,9 +188,20 @@ export class ProductsService {
       where.categoryId = { in: allCatIds };
     }
 
-    // 2. Brand Filter
+    // 2. Brand Filter (supports single ID or comma-separated multiple IDs)
     if (query.brandId) {
-      where.brandId = Number(query.brandId);
+      const raw = String(query.brandId).trim();
+      if (raw.includes(',')) {
+        const ids = raw.split(',').map((id) => Number(id.trim())).filter((id) => !isNaN(id));
+        if (ids.length > 0) {
+          where.brandId = { in: ids };
+        }
+      } else {
+        const id = Number(raw);
+        if (!isNaN(id)) {
+          where.brandId = id;
+        }
+      }
     }
 
     // 3. Price Filter
@@ -194,23 +212,32 @@ export class ProductsService {
     }
 
     // 4. Text Search
-    if (query.q) {
-      const q = query.q.trim();
+    const searchTerm = (query.search || query.q || '').trim();
+    if (searchTerm) {
       where.OR = [
-        { name: { contains: q } },
-        { productCode: { contains: q } },
-        { description: { contains: q } },
-        { brand: { name: { contains: q } } },
+        { name: { contains: searchTerm } },
+        { productCode: { contains: searchTerm } },
+        { description: { contains: searchTerm } },
+        { brand: { name: { contains: searchTerm } } },
+        { category: { name: { contains: searchTerm } } },
+        { variants: { some: { sku: { contains: searchTerm } } } },
       ];
     }
 
-    // 5. Dynamic Attributes Filter
+    // 5. Dynamic Attributes Filter (supports single value or array of values per attribute)
     if (query.attrs) {
       try {
-        const parsedAttrs: Record<string, string> = JSON.parse(query.attrs);
+        const parsedAttrs: Record<string, any> = JSON.parse(query.attrs);
         const attributeConditions: any[] = [];
 
-        for (const [slug, val] of Object.entries(parsedAttrs)) {
+        for (const [slug, rawVal] of Object.entries(parsedAttrs)) {
+          if (!rawVal) continue;
+          const values: string[] = (Array.isArray(rawVal) ? rawVal : [rawVal])
+            .map((v) => String(v).trim())
+            .filter(Boolean);
+
+          if (values.length === 0) continue;
+
           attributeConditions.push({
             OR: [
               // Matches product attribute value
@@ -219,8 +246,8 @@ export class ProductsService {
                   some: {
                     attribute: { slug },
                     OR: [
-                      { attributeValue: { value: val } },
-                      { valueText: val },
+                      { attributeValue: { value: { in: values } } },
+                      { valueText: { in: values } },
                     ],
                   },
                 },
@@ -232,7 +259,7 @@ export class ProductsService {
                     variantValues: {
                       some: {
                         attribute: { slug },
-                        attributeValue: { value: val },
+                        attributeValue: { value: { in: values } },
                       },
                     },
                   },
@@ -265,7 +292,7 @@ export class ProductsService {
         orderBy,
         include: {
           brand: { select: { id: true, name: true, logo: true, slug: true } },
-          category: { select: { id: true, name: true, slug: true, categoryCode: true } },
+          category: { select: { id: true, name: true, slug: true, categoryCode: true, gstRate: true } },
           images: { orderBy: { sortOrder: 'asc' } },
           variants: {
             where: { status: 'ACTIVE' },
@@ -290,6 +317,8 @@ export class ProductsService {
       const ratings = p.reviews.map((r) => r.rating);
       const avgRating = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
       const totalStock = p.variants.reduce((acc, v) => acc + v.stockQuantity, 0);
+      const categoryGst = Number(p.category?.gstRate ?? 5);
+      const effectiveGstRate = p.useCategoryGst ? categoryGst : (p.gstRate !== null ? Number(p.gstRate) : categoryGst);
 
       return {
         id: p.id,
@@ -300,6 +329,9 @@ export class ProductsService {
         basePrice: p.basePrice,
         status: p.status,
         minStockAlert: p.minStockAlert,
+        useCategoryGst: p.useCategoryGst,
+        gstRate: p.gstRate !== null && p.gstRate !== undefined ? Number(p.gstRate) : null,
+        effectiveGstRate,
         categoryId: p.categoryId,
         brandId: p.brandId,
         brand: p.brand,
@@ -315,15 +347,7 @@ export class ProductsService {
       };
     });
 
-    return {
-      items,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    return createPaginatedResponse(items, total, page, limit);
   }
 
   async findOne(idOrSlug: string | number) {
@@ -376,9 +400,14 @@ export class ProductsService {
         : 0;
 
     const totalStock = product.variants.reduce((acc, v) => acc + v.stockQuantity, 0);
+    const categoryGst = Number(product.category?.gstRate ?? 5);
+    const effectiveGstRate = product.useCategoryGst ? categoryGst : (product.gstRate !== null ? Number(product.gstRate) : categoryGst);
 
     return {
       ...product,
+      useCategoryGst: product.useCategoryGst,
+      gstRate: product.gstRate !== null && product.gstRate !== undefined ? Number(product.gstRate) : null,
+      effectiveGstRate,
       breadcrumbs,
       totalStock,
       isLowStock: totalStock <= product.minStockAlert,
@@ -448,6 +477,8 @@ export class ProductsService {
           basePrice: dto.basePrice,
           status: dto.status || 'ACTIVE',
           minStockAlert: dto.minStockAlert || 5,
+          useCategoryGst: dto.useCategoryGst !== undefined ? dto.useCategoryGst : true,
+          gstRate: dto.gstRate !== undefined ? dto.gstRate : null,
         },
       });
 
@@ -567,6 +598,8 @@ export class ProductsService {
     if (dto.basePrice !== undefined) updateData.basePrice = dto.basePrice;
     if (dto.status) updateData.status = dto.status;
     if (dto.minStockAlert !== undefined) updateData.minStockAlert = dto.minStockAlert;
+    if (dto.useCategoryGst !== undefined) updateData.useCategoryGst = dto.useCategoryGst;
+    if (dto.gstRate !== undefined) updateData.gstRate = dto.gstRate;
 
     await this.prisma.raw.$transaction(async (tx) => {
       // 1. Update Base Product

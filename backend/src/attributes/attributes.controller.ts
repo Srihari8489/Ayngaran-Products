@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -23,8 +24,8 @@ export class AttributesController {
   constructor(private attributesService: AttributesService) {}
 
   @Get()
-  async findAll() {
-    return this.attributesService.findAll();
+  async findAll(@Query() query?: any) {
+    return this.attributesService.findAll(query);
   }
 
   @Get(':id')

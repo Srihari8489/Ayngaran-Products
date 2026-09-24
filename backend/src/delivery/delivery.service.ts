@@ -5,20 +5,56 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeliveryPartnerDto } from './dto/create-delivery-partner.dto';
+import { createPaginatedResponse } from '../common/utils/pagination.util';
 
 @Injectable()
 export class DeliveryService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
-    return this.prisma.client.deliveryPartner.findMany({
-      include: {
-        _count: {
-          select: { assignments: true },
+  async findAll(query?: any) {
+    const isPaginated = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.status !== undefined);
+    const page = Math.max(1, parseInt(query?.page as string, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(query?.limit as string, 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (query?.status === 'ACTIVE') where.isActive = true;
+    else if (query?.status === 'INACTIVE') where.isActive = false;
+
+    if (query?.search) {
+      const s = String(query.search).trim();
+      where.OR = [
+        { name: { contains: s } },
+        { partnerCode: { contains: s } },
+        { contactPhone: { contains: s } },
+        { contactEmail: { contains: s } },
+      ];
+    }
+
+    if (!isPaginated) {
+      return this.prisma.client.deliveryPartner.findMany({
+        where,
+        include: {
+          _count: { select: { assignments: true } },
         },
-      },
-      orderBy: { name: 'asc' },
-    });
+        orderBy: { name: 'asc' },
+      });
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.client.deliveryPartner.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          _count: { select: { assignments: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.client.deliveryPartner.count({ where }),
+    ]);
+
+    return createPaginatedResponse(items, total, page, limit);
   }
 
   async findOne(id: number) {

@@ -442,7 +442,7 @@ async function main() {
       isActive: true,
     },
   });
-
+ 
   // 4. Seed Sample Customer User
   console.log('  -> Seeding Sample Customer...');
   const sampleUser = await prisma.user.upsert({

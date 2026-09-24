@@ -15,8 +15,13 @@ import {
   AlertCircle
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { Category, Attribute } from '../types';
+import { Category, Attribute, PaginationMeta } from '../types';
 import { ImageUploadField } from '../components/ImageUploadField';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { Search, LayoutList } from 'lucide-react';
+import { AdminModal } from '../components/AdminModal';
+import { DynamicGstSelect } from '../components/DynamicGstSelect';
 
 export const CategoriesPage: React.FC = () => {
   const [categoriesTree, setCategoriesTree] = useState<Category[]>([]);
@@ -27,6 +32,24 @@ export const CategoriesPage: React.FC = () => {
   const [expandedNodes, setExpandedNodes] = useState<Record<number, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [attrLoading, setAttrLoading] = useState(false);
+
+  // Table view & server pagination states
+  const [viewMode, setViewMode] = useState<'TREE' | 'TABLE'>('TABLE');
+  const [tableCategories, setTableCategories] = useState<Category[]>([]);
+  const [tablePagination, setTablePagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [tablePage, setTablePage] = useState(1);
+  const [tableLimit, setTableLimit] = useState(20);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [tableLoading, setTableLoading] = useState(false);
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -45,6 +68,7 @@ export const CategoriesPage: React.FC = () => {
     image: '',
     parentId: '' as string | number,
     sortOrder: 0,
+    gstRate: 0,
     isActive: true,
   });
 
@@ -91,9 +115,39 @@ export const CategoriesPage: React.FC = () => {
     }
   };
 
+  const fetchTableCategories = async () => {
+    try {
+      setTableLoading(true);
+      const params = new URLSearchParams();
+      params.append('page', String(tablePage));
+      params.append('limit', String(tableLimit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (statusFilter !== 'ALL') params.append('status', statusFilter);
+
+      const res: any = await adminApi.get(`/categories?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setTableCategories(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setTablePagination(res.pagination);
+      }
+    } catch (err) {
+      console.error('Failed to load table categories:', err);
+    } finally {
+      setTableLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    setTablePage(1);
+  }, [debouncedSearch, statusFilter]);
+
+  useEffect(() => {
+    fetchTableCategories();
+  }, [tablePage, tableLimit, debouncedSearch, statusFilter]);
 
   const handleSelectCategory = async (cat: Category) => {
     setSelectedCategory(cat);
@@ -119,6 +173,7 @@ export const CategoriesPage: React.FC = () => {
       await adminApi.post('/categories', {
         ...formData,
         parentId: formData.parentId ? Number(formData.parentId) : null,
+        gstRate: Number(formData.gstRate ?? 0),
       });
       setIsCreateModalOpen(false);
       setFormData({
@@ -129,6 +184,7 @@ export const CategoriesPage: React.FC = () => {
         image: '',
         parentId: '',
         sortOrder: 0,
+        gstRate: 0,
         isActive: true,
       });
       fetchData();
@@ -149,6 +205,7 @@ export const CategoriesPage: React.FC = () => {
         image: formData.image,
         parentId: formData.parentId ? Number(formData.parentId) : null,
         sortOrder: formData.sortOrder,
+        gstRate: Number(formData.gstRate ?? 0),
         isActive: formData.isActive,
       });
       setIsEditModalOpen(false);
@@ -298,29 +355,281 @@ export const CategoriesPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setFormData({
-              name: '',
-              categoryCode: `CAT-${Date.now().toString().slice(-4)}`,
-              slug: '',
-              description: '',
-              image: '',
-              parentId: selectedCategory ? selectedCategory.id : '',
-              sortOrder: 0,
-              isActive: true,
-            });
-            setIsCreateModalOpen(true);
-          }}
-          className="btn-primary"
-          style={{ fontSize: '0.85rem' }}
-        >
-          <Plus size={16} />
-          <span>Add Category</span>
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          {/* View Mode Toggle */}
+          <div style={{ display: 'flex', backgroundColor: '#f1f5f9', padding: '0.2rem', borderRadius: '0.65rem' }}>
+            <button
+              type="button"
+              onClick={() => setViewMode('TABLE')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.4rem 0.75rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                border: 'none',
+                backgroundColor: viewMode === 'TABLE' ? '#ffffff' : 'transparent',
+                color: viewMode === 'TABLE' ? '#0f172a' : '#64748b',
+                cursor: 'pointer',
+                boxShadow: viewMode === 'TABLE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              <LayoutList size={14} /> Table View
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('TREE')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.4rem 0.75rem',
+                borderRadius: '0.5rem',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                border: 'none',
+                backgroundColor: viewMode === 'TREE' ? '#ffffff' : 'transparent',
+                color: viewMode === 'TREE' ? '#0f172a' : '#64748b',
+                cursor: 'pointer',
+                boxShadow: viewMode === 'TREE' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}
+            >
+              <FolderTree size={14} /> Tree & Specs
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setFormData({
+                name: '',
+                categoryCode: `CAT-${Date.now().toString().slice(-4)}`,
+                slug: '',
+                description: '',
+                image: '',
+                parentId: '',
+                sortOrder: 0,
+                gstRate: 0,
+                isActive: true,
+              });
+              setIsCreateModalOpen(true);
+            }}
+            className="btn-primary"
+            style={{ fontSize: '0.85rem' }}
+          >
+            <Plus size={16} />
+            <span>Add Category</span>
+          </button>
+        </div>
       </div>
 
-      {/* Main Grid: Tree Visualizer on Left, Detail & Attribute Inheritance on Right */}
+      {viewMode === 'TABLE' ? (
+        /* TABLE VIEW with Server Pagination, Search, and Status Filter */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Search & Filter Toolbar */}
+          <div className="glass-card" style={{ padding: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+              <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                className="form-input"
+                style={{ paddingLeft: '2.5rem', paddingRight: search ? '2.2rem' : '0.9rem' }}
+                placeholder="Search categories by name, code, slug, description..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '0.2rem',
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
+            <div style={{ width: '160px' }}>
+              <select
+                className="form-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="glass-card" style={{ padding: '1.5rem', overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Code</th>
+                    <th>Slug</th>
+                    <th>Default GST</th>
+                    <th>Parent Category</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableLoading ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                        Loading categories...
+                      </td>
+                    </tr>
+                  ) : tableCategories.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                        No categories found.
+                      </td>
+                    </tr>
+                  ) : (
+                    tableCategories.map((c) => (
+                      <tr key={c.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            {c.image ? (
+                              <img
+                                src={c.image}
+                                alt={c.name}
+                                style={{ width: '2.5rem', height: '2.5rem', borderRadius: '0.5rem', objectFit: 'cover', border: '1px solid var(--border-color)' }}
+                              />
+                            ) : (
+                              <div
+                                style={{
+                                  width: '2.5rem',
+                                  height: '2.5rem',
+                                  borderRadius: '0.5rem',
+                                  backgroundColor: '#f1f5f9',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  color: 'var(--text-muted)',
+                                }}
+                              >
+                                <FolderTree size={16} />
+                              </div>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.88rem' }}>{c.name}</div>
+                              {c.description && (
+                                <div style={{ fontSize: '0.75rem', color: '#64748b', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {c.description}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--accent-amber)', fontWeight: 600 }}>
+                            {c.categoryCode}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.76rem', color: '#64748b' }}>
+                            {c.slug}
+                          </span>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: '0.375rem',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              backgroundColor: '#ecfdf5',
+                              color: '#065f46',
+                              border: '1px solid #a7f3d0',
+                            }}
+                          >
+                            GST {c.gstRate ?? 5}%
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.8rem', color: '#0f172a' }}>
+                            {c.parent ? c.parent.name : '— (Root)'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${c.isActive ? 'badge-success' : 'badge-neutral'}`}>
+                            {c.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCategory(c);
+                                setFormData({
+                                  name: c.name,
+                                  categoryCode: c.categoryCode,
+                                  slug: c.slug,
+                                  description: c.description || '',
+                                  image: c.image || '',
+                                  parentId: c.parentId || '',
+                                  sortOrder: c.sortOrder || 0,
+                                  gstRate: c.gstRate !== undefined && c.gstRate !== null ? Number(c.gstRate) : 5,
+                                  isActive: c.isActive,
+                                });
+                                setIsEditModalOpen(true);
+                              }}
+                              className="btn-secondary"
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                            >
+                              <Edit2 size={13} /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedCategory(c);
+                                setViewMode('TREE');
+                                handleSelectCategory(c);
+                              }}
+                              className="btn-secondary"
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                              title="Configure specs in tree view"
+                            >
+                              <Sliders size={13} /> Specs
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              pagination={tablePagination}
+              onPageChange={setTablePage}
+              onLimitChange={setTableLimit}
+              loading={tableLoading}
+            />
+          </div>
+        </div>
+      ) : (
+      /* Main Grid: Tree Visualizer on Left, Detail & Attribute Inheritance on Right */
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 1fr) minmax(360px, 1.3fr)', gap: '1.5rem' }}>
         {/* Left Column: Tree Visualizer */}
         <div className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column' }}>
@@ -387,6 +696,7 @@ export const CategoriesPage: React.FC = () => {
                           image: selectedCategory.image || '',
                           parentId: selectedCategory.parentId || '',
                           sortOrder: selectedCategory.sortOrder || 0,
+                          gstRate: selectedCategory.gstRate !== undefined ? Number(selectedCategory.gstRate) : 5,
                           isActive: selectedCategory.isActive,
                         });
                         setIsEditModalOpen(true);
@@ -559,348 +869,320 @@ export const CategoriesPage: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* Create Category Modal */}
-      {isCreateModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '32rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Add New Category
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateCategory} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                    Category Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="form-input"
-                    value={formData.name}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'CAT';
-                      const currentCode = formData.categoryCode;
-                      const suffix = currentCode.split('-').pop() || String(Math.floor(1000 + Math.random() * 9000));
-                      setFormData({
-                        ...formData,
-                        name,
-                        categoryCode: `CAT-${prefix}-${suffix}`,
-                        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-                      });
-                    }}
-                    placeholder="e.g. Gaming Laptops"
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                    Category Code <span style={{ fontSize: '0.68rem', color: '#2563eb', fontWeight: 600, marginLeft: '0.35rem' }}>(Auto-generated, Immutable)</span>
-                  </label>
-                  <input
-                    type="text"
-                    disabled
-                    readOnly
-                    className="form-input"
-                    style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#334155', fontWeight: 700 }}
-                    value={formData.categoryCode}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Parent Node (Empty for Root Category)
-                </label>
-                <select
-                  className="form-select"
-                  value={formData.parentId}
-                  onChange={(e) => setFormData({ ...formData, parentId: e.target.value })}
-                >
-                  <option value="">None (Root Category)</option>
-                  {flatCategories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.categoryCode})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Slug (URL path)
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.slug}
-                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                  placeholder="e.g. gaming-laptops"
-                />
-              </div>
-
-              {/* Category Image Field */}
-              <ImageUploadField
-                label="Category Image"
-                description="Upload banner or select an existing asset from the server's uploads/ folder"
-                value={formData.image}
-                onChange={(url) => setFormData({ ...formData, image: url })}
-                multiple={false}
-              />
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Description
-                </label>
-                <textarea
-                  className="form-input"
-                  style={{ height: '4rem', resize: 'none' }}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Category overview..."
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Category
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Add New Category"
+        subtitle="Create a new root or sub-category in the catalog hierarchy"
+        maxWidth="34rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleCreateCategory} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                Category Name *
+              </label>
+              <input
+                type="text"
+                required
+                className="form-input"
+                value={formData.name}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  const prefix = name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'CAT';
+                  const currentCode = formData.categoryCode;
+                  const suffix = currentCode.split('-').pop() || String(Math.floor(1000 + Math.random() * 9000));
+                  setFormData({
+                    ...formData,
+                    name,
+                    categoryCode: `CAT-${prefix}-${suffix}`,
+                    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                  });
+                }}
+                placeholder="e.g. Gaming Laptops"
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+                Category Code <span style={{ fontSize: '0.68rem', color: '#2563eb', fontWeight: 600, marginLeft: '0.35rem' }}>(Auto-generated)</span>
+              </label>
+              <input
+                type="text"
+                disabled
+                readOnly
+                className="form-input"
+                style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#334155', fontWeight: 700 }}
+                value={formData.categoryCode}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Parent Node (Empty for Root Category)
+            </label>
+            <select
+              className="form-select"
+              value={formData.parentId}
+              onChange={(e) => setFormData({ ...formData, parentId: e.target.value })}
+            >
+              <option value="">None (Root Category / Top-level)</option>
+              {flatCategories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.categoryCode})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Slug (URL path)
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.slug}
+              onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+              placeholder="e.g. gaming-laptops"
+            />
+          </div>
+
+          <DynamicGstSelect
+            label="Default GST Rate (%) *"
+            value={Number(formData.gstRate ?? 0)}
+            onChange={(rate) => setFormData({ ...formData, gstRate: rate })}
+          />
+
+          {/* Category Image Field */}
+          <ImageUploadField
+            label="Category Image"
+            description="Upload banner or select an existing asset from the server's uploads/ folder"
+            value={formData.image}
+            onChange={(url) => setFormData({ ...formData, image: url })}
+            multiple={false}
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Description
+            </label>
+            <textarea
+              className="form-input"
+              style={{ height: '4rem', resize: 'none' }}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Category overview..."
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Category
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Edit Category Modal */}
-      {isEditModalOpen && selectedCategory && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '32rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '1rem' }}>
-              Edit Category: {selectedCategory.name}
-            </h3>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleUpdateCategory} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Category Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Parent Category
-                </label>
-                <select
-                  className="form-select"
-                  value={formData.parentId}
-                  onChange={(e) => setFormData({ ...formData, parentId: e.target.value })}
-                >
-                  <option value="">None (Root Category)</option>
-                  {flatCategories
-                    .filter((c) => c.id !== selectedCategory.id)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.categoryCode})
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Slug
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={formData.slug}
-                  onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-                />
-              </div>
-
-              {/* Category Image Field */}
-              <ImageUploadField
-                label="Category Image"
-                description="Upload banner or select an existing asset from the server's uploads/ folder"
-                value={formData.image}
-                onChange={(url) => setFormData({ ...formData, image: url })}
-                multiple={false}
-              />
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Description
-                </label>
-                <textarea
-                  className="form-input"
-                  style={{ height: '4rem', resize: 'none' }}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  Save Changes
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditModalOpen && !!selectedCategory}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Edit Category: ${selectedCategory?.name || ''}`}
+        subtitle={`Category Code: ${selectedCategory?.categoryCode || ''}`}
+        maxWidth="34rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: 'rgba(244,63,94,0.15)', color: '#fb7185', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleUpdateCategory} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Category Name
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Parent Category
+            </label>
+            <select
+              className="form-select"
+              value={formData.parentId}
+              onChange={(e) => setFormData({ ...formData, parentId: e.target.value })}
+            >
+              <option value="">None (Root Category / Top-level)</option>
+              {flatCategories
+                .filter((c) => c.id !== selectedCategory?.id)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.categoryCode})
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Slug
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={formData.slug}
+              onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
+            />
+          </div>
+
+          {/* Category Image Field */}
+          <ImageUploadField
+            label="Category Image"
+            description="Upload banner or select an existing asset from the server's uploads/ folder"
+            value={formData.image}
+            onChange={(url) => setFormData({ ...formData, image: url })}
+            multiple={false}
+          />
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Description
+            </label>
+            <textarea
+              className="form-input"
+              style={{ height: '4rem', resize: 'none' }}
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+          </div>
+
+          <DynamicGstSelect
+            label="Default GST Rate (%) *"
+            value={Number(formData.gstRate ?? 0)}
+            onChange={(rate) => setFormData({ ...formData, gstRate: rate })}
+          />
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </AdminModal>
 
       {/* Map Attribute Modal */}
-      {isMapAttrModalOpen && selectedCategory && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '28rem', width: '100%', padding: '2rem', borderRadius: '1.25rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' }}>
-              {isEditingMapping ? 'Edit Category Specification' : 'Add Category Specification'}
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-              {isEditingMapping ? 'Configure specification settings for' : 'Attach to'}{' '}
-              <strong style={{ color: '#0f172a' }}>{selectedCategory.name}</strong>
-            </p>
-
-            <form onSubmit={handleMapAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
-                  Specification Attribute
-                </label>
-                <select
-                  className="form-select"
-                  value={mapAttrData.attributeId}
-                  onChange={(e) => setMapAttrData({ ...mapAttrData, attributeId: e.target.value })}
-                  disabled={isEditingMapping}
-                  required
-                >
-                  {allAttributes.map((attr) => (
-                    <option key={attr.id} value={attr.id}>
-                      {attr.name} ({attr.dataType})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={mapAttrData.isFilterable}
-                    onChange={(e) => setMapAttrData({ ...mapAttrData, isFilterable: e.target.checked })}
-                  />
-                  <span>Show in customer filter sidebar</span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={mapAttrData.isRequired}
-                    onChange={(e) => setMapAttrData({ ...mapAttrData, isRequired: e.target.checked })}
-                  />
-                  <span>Mandatory specification for products</span>
-                </label>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={mapAttrData.isVariant}
-                    onChange={(e) => setMapAttrData({ ...mapAttrData, isVariant: e.target.checked })}
-                  />
-                  <span>Use as variant option (e.g. Color, Storage, Size)</span>
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsMapAttrModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
-                  {isEditingMapping ? 'Save Changes' : 'Attach Attribute'}
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isMapAttrModalOpen && !!selectedCategory}
+        onClose={() => setIsMapAttrModalOpen(false)}
+        title={isEditingMapping ? 'Edit Category Specification' : 'Add Category Specification'}
+        subtitle={
+          <span>
+            {isEditingMapping ? 'Configure specification settings for ' : 'Attach to '}
+            <strong style={{ color: '#0f172a' }}>{selectedCategory?.name}</strong>
+          </span>
+        }
+        maxWidth="30rem"
+      >
+        <form onSubmit={handleMapAttribute} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>
+              Specification Attribute
+            </label>
+            <select
+              className="form-select"
+              value={mapAttrData.attributeId}
+              onChange={(e) => setMapAttrData({ ...mapAttrData, attributeId: e.target.value })}
+              disabled={isEditingMapping}
+              required
+            >
+              {allAttributes.map((attr) => (
+                <option key={attr.id} value={attr.id}>
+                  {attr.name} ({attr.dataType})
+                </option>
+              ))}
+            </select>
           </div>
-        </div>
-      )}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={mapAttrData.isFilterable}
+                onChange={(e) => setMapAttrData({ ...mapAttrData, isFilterable: e.target.checked })}
+              />
+              <span>Show in customer filter sidebar</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={mapAttrData.isRequired}
+                onChange={(e) => setMapAttrData({ ...mapAttrData, isRequired: e.target.checked })}
+              />
+              <span>Mandatory specification for products</span>
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.82rem', color: '#0f172a', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={mapAttrData.isVariant}
+                onChange={(e) => setMapAttrData({ ...mapAttrData, isVariant: e.target.checked })}
+              />
+              <span>Use as variant option (e.g. Color, Storage, Size)</span>
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #e2e8f0' }}>
+            <button
+              type="button"
+              onClick={() => setIsMapAttrModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" style={{ fontSize: '0.85rem' }}>
+              {isEditingMapping ? 'Save Changes' : 'Attach Attribute'}
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };

@@ -1,7 +1,15 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class RequestOtpDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  identifier: string; // phone number or email address
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  identifier?: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
 }

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import adminApi from '../api/client';
 import { PaymentGateway } from '../types';
+import { AdminModal } from '../components/AdminModal';
 
 export const GatewaysPage: React.FC = () => {
   const [gateways, setGateways] = useState<PaymentGateway[]>([]);
@@ -222,123 +223,106 @@ export const GatewaysPage: React.FC = () => {
       </div>
 
       {/* Edit Gateway Modal */}
-      {isEditModalOpen && selectedGateway && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '32rem', width: '100%', padding: '2rem', borderRadius: '1.25rem', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' }}>
-              Configure {selectedGateway.name}
-            </h3>
-            <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '1.25rem' }}>
-              Enter payment gateway credentials. Secret parameters are encrypted before storage.
-            </p>
-
-            {formError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem', borderRadius: '0.65rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div>
-                  <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.88rem' }}>Enable Payment Option</span>
-                  <p style={{ fontSize: '0.75rem', color: '#64748b' }}>Show this option to customers at checkout</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={formData.isEnabled}
-                  onChange={(e) => setFormData({ ...formData, isEnabled: e.target.checked })}
-                  style={{ width: '1.2rem', height: '1.2rem', cursor: 'pointer' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Environment Mode
-                </label>
-                <select
-                  className="form-select"
-                  value={formData.mode}
-                  onChange={(e) => setFormData({ ...formData, mode: e.target.value as any })}
-                >
-                  <option value="TEST">Test / Sandbox (Test payments without real money)</option>
-                  <option value="LIVE">Live Production (Real customer payments)</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Merchant ID / Public Key
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={formData.keyId}
-                  onChange={(e) => setFormData({ ...formData, keyId: e.target.value })}
-                  placeholder="e.g. rzp_test_..."
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Secret Key {selectedGateway.hasSecretKey && <span style={{ color: '#16a34a', fontWeight: 400 }}>(Secret already set, leave empty to keep)</span>}
-                </label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={formData.secretKey}
-                  onChange={(e) => setFormData({ ...formData, secretKey: e.target.value })}
-                  placeholder={selectedGateway.hasSecretKey ? '••••••••••••••••' : 'Enter secret key'}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Webhook Secret (Optional) {selectedGateway.hasWebhookSecret && <span style={{ color: '#16a34a', fontWeight: 400 }}>(Secret set, leave empty to keep)</span>}
-                </label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={formData.webhookSecret}
-                  onChange={(e) => setFormData({ ...formData, webhookSecret: e.target.value })}
-                  placeholder={selectedGateway.hasWebhookSecret ? '••••••••••••••••' : 'Enter webhook secret'}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="btn-primary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  {submitting ? 'Saving...' : 'Save Settings'}
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isEditModalOpen && !!selectedGateway}
+        onClose={() => setIsEditModalOpen(false)}
+        title={`Configure ${selectedGateway?.name || 'Gateway'}`}
+        subtitle="Enter payment gateway credentials. Secret parameters are encrypted before storage."
+        maxWidth="32rem"
+      >
+        {formError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem' }}>
+            {formError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.85rem', borderRadius: '0.65rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <div>
+              <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.88rem' }}>Enable Payment Option</span>
+              <p style={{ fontSize: '0.75rem', color: '#64748b' }}>Show this option to customers at checkout</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={formData.isEnabled}
+              onChange={(e) => setFormData({ ...formData, isEnabled: e.target.checked })}
+              style={{ width: '1.2rem', height: '1.2rem', cursor: 'pointer' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Environment Mode
+            </label>
+            <select
+              className="form-select"
+              value={formData.mode}
+              onChange={(e) => setFormData({ ...formData, mode: e.target.value as any })}
+            >
+              <option value="TEST">Test / Sandbox (Test payments without real money)</option>
+              <option value="LIVE">Live Production (Real customer payments)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Merchant ID / Public Key
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={formData.keyId}
+              onChange={(e) => setFormData({ ...formData, keyId: e.target.value })}
+              placeholder="e.g. rzp_test_..."
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Secret Key {selectedGateway?.hasSecretKey && <span style={{ color: '#16a34a', fontWeight: 400 }}>(Secret already set, leave empty to keep)</span>}
+            </label>
+            <input
+              type="password"
+              className="form-input"
+              value={formData.secretKey}
+              onChange={(e) => setFormData({ ...formData, secretKey: e.target.value })}
+              placeholder={selectedGateway?.hasSecretKey ? '••••••••••••••••' : 'Enter secret key'}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Webhook Secret (Optional) {selectedGateway?.hasWebhookSecret && <span style={{ color: '#16a34a', fontWeight: 400 }}>(Secret set, leave empty to keep)</span>}
+            </label>
+            <input
+              type="password"
+              className="form-input"
+              value={formData.webhookSecret}
+              onChange={(e) => setFormData({ ...formData, webhookSecret: e.target.value })}
+              placeholder={selectedGateway?.hasWebhookSecret ? '••••••••••••••••' : 'Enter webhook secret'}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              onClick={() => setIsEditModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn-primary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              {submitting ? 'Saving...' : 'Save Settings'}
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };

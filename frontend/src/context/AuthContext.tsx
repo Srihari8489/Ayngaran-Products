@@ -9,8 +9,8 @@ interface AuthContextType {
   isLoginModalOpen: boolean;
   openLoginModal: () => void;
   closeLoginModal: () => void;
-  requestOtp: (identifier: string) => Promise<{ message: string; devOtp?: string; expiresInSeconds: number }>;
-  verifyOtp: (identifier: string, otp: string) => Promise<void>;
+  requestOtp: (identifier: string, name?: string) => Promise<{ success?: boolean; message: string; devOtp?: string; demoWhatsAppUrl?: string; expiresInSeconds?: number }>;
+  verifyOtp: (identifier: string, otp: string, name?: string) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
 }
@@ -49,15 +49,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile();
   }, []);
 
-  const requestOtp = async (identifier: string) => {
-    return (await api.post('/auth/customer/request-otp', { identifier })) as any;
+  const requestOtp = async (phone: string, _name?: string) => {
+    return (await api.post('/auth/customer/send-otp', { phone, identifier: phone })) as any;
   };
 
-  const verifyOtp = async (identifier: string, otp: string) => {
-    const res: any = await api.post('/auth/customer/verify-otp', { identifier, otp });
+  const verifyOtp = async (phone: string, otp: string, name?: string) => {
+    let res: any;
+    try {
+      res = await api.post('/auth/customer/verify-otp', { phone, identifier: phone, otp, name });
+    } catch (err: any) {
+      if (err.message && err.message.includes('name should not exist')) {
+        res = await api.post('/auth/customer/verify-otp', { phone, identifier: phone, otp });
+      } else {
+        throw err;
+      }
+    }
+
     localStorage.setItem('ayngaran_customer_token', res.accessToken);
     localStorage.setItem('ayngaran_customer_refresh_token', res.refreshToken);
-    setUser(res.user);
+
+    let loggedInUser = res.user;
+
+    // Persist customer name if entered
+    if (name && name.trim()) {
+      try {
+        const updated = (await api.patch('/auth/customer/profile', { name: name.trim() })) as any;
+        if (updated && updated.name) {
+          loggedInUser = { ...loggedInUser, name: updated.name };
+        }
+      } catch (err) {
+        console.warn('Could not auto-update profile name:', err);
+      }
+    }
+
+    setUser(loggedInUser);
     closeLoginModal();
   };
 
@@ -65,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('ayngaran_customer_token');
     localStorage.removeItem('ayngaran_customer_refresh_token');
     setUser(null);
+    closeLoginModal();
   };
 
   return (

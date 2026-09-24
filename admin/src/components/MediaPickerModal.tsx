@@ -51,6 +51,15 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const fetchMedia = async () => {
     try {
       setLoading(true);
@@ -139,6 +148,11 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
 
   return (
     <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -149,6 +163,7 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
         alignItems: 'center',
         justifyContent: 'center',
         padding: '1.25rem',
+        overflowY: 'auto',
       }}
     >
       <div
@@ -156,7 +171,8 @@ export const MediaPickerModal: React.FC<MediaPickerModalProps> = ({
         style={{
           width: '100%',
           maxWidth: '56rem',
-          maxHeight: '90vh',
+          maxHeight: 'calc(100vh - 2.5rem)',
+          margin: 'auto',
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: '#ffffff',

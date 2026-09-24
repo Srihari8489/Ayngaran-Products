@@ -15,16 +15,43 @@ import {
   X
 } from 'lucide-react';
 import adminApi from '../api/client';
-import { InventoryTransaction } from '../types';
+import { InventoryTransaction, PaginationMeta } from '../types';
+import { Pagination } from '../components/Pagination';
+import { useDebounce } from '../hooks/useDebounce';
+import { AdminModal } from '../components/AdminModal';
 
 export const InventoryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'LEDGER'>('OVERVIEW');
   const [stockItems, setStockItems] = useState<any[]>([]);
+  const [stockPagination, setStockPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [stockPage, setStockPage] = useState(1);
+  const [stockLimit, setStockLimit] = useState(20);
+
   const [ledgerItems, setLedgerItems] = useState<InventoryTransaction[]>([]);
+  const [ledgerPagination, setLedgerPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPreviousPage: false,
+  });
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerLimit, setLedgerLimit] = useState(20);
+  const [ledgerTypeFilter, setLedgerTypeFilter] = useState('ALL');
+
   const [loading, setLoading] = useState(true);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 350);
 
   // Stock Adjustment Modal
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
@@ -41,8 +68,18 @@ export const InventoryPage: React.FC = () => {
   const fetchStock = async () => {
     try {
       setLoading(true);
-      const res: any = await adminApi.get('/inventory');
-      setStockItems(res.data || res || []);
+      const params = new URLSearchParams();
+      params.append('page', String(stockPage));
+      params.append('limit', String(stockLimit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (lowStockOnly) params.append('lowStockOnly', 'true');
+
+      const res: any = await adminApi.get(`/inventory?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setStockItems(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setStockPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load stock overview:', err);
     } finally {
@@ -53,8 +90,18 @@ export const InventoryPage: React.FC = () => {
   const fetchLedger = async () => {
     try {
       setLedgerLoading(true);
-      const res: any = await adminApi.get('/inventory/history');
-      setLedgerItems(res.data || res || []);
+      const params = new URLSearchParams();
+      params.append('page', String(ledgerPage));
+      params.append('limit', String(ledgerLimit));
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (ledgerTypeFilter !== 'ALL') params.append('type', ledgerTypeFilter);
+
+      const res: any = await adminApi.get(`/inventory/history?${params.toString()}`);
+      const items = res?.data || res?.items || (Array.isArray(res) ? res : []);
+      setLedgerItems(Array.isArray(items) ? items : []);
+      if (res?.pagination) {
+        setLedgerPagination(res.pagination);
+      }
     } catch (err) {
       console.error('Failed to load inventory ledger:', err);
     } finally {
@@ -62,13 +109,26 @@ export const InventoryPage: React.FC = () => {
     }
   };
 
+  // Reset pages on filter/search change
+  useEffect(() => {
+    if (activeTab === 'OVERVIEW') {
+      setStockPage(1);
+    } else {
+      setLedgerPage(1);
+    }
+  }, [debouncedSearch, lowStockOnly, ledgerTypeFilter, activeTab]);
+
   useEffect(() => {
     if (activeTab === 'OVERVIEW') {
       fetchStock();
-    } else {
+    }
+  }, [activeTab, stockPage, stockLimit, debouncedSearch, lowStockOnly]);
+
+  useEffect(() => {
+    if (activeTab === 'LEDGER') {
       fetchLedger();
     }
-  }, [activeTab]);
+  }, [activeTab, ledgerPage, ledgerLimit, debouncedSearch, ledgerTypeFilter]);
 
   const handleOpenAdjustModal = (item?: any) => {
     setSelectedVariant(item || null);
@@ -104,19 +164,8 @@ export const InventoryPage: React.FC = () => {
     }
   };
 
-  const filteredStock = stockItems.filter((item) => {
-    const isLow = item.stockQuantity <= item.minStockAlert;
-    if (lowStockOnly && !isLow) return false;
-
-    const query = search.toLowerCase();
-    return (
-      (item.sku && item.sku.toLowerCase().includes(query)) ||
-      (item.productName && item.productName.toLowerCase().includes(query)) ||
-      (item.productCode && item.productCode.toLowerCase().includes(query))
-    );
-  });
-
-  const lowStockCount = stockItems.filter((i) => i.stockQuantity <= i.minStockAlert).length;
+  const filteredStock = Array.isArray(stockItems) ? stockItems : [];
+  const lowStockCount = stockPagination.total ? stockItems.filter((i) => i.isLowStock).length : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -322,6 +371,12 @@ export const InventoryPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              pagination={stockPagination}
+              onPageChange={setStockPage}
+              onLimitChange={setStockLimit}
+              loading={loading}
+            />
           </div>
         </div>
       )}
@@ -447,125 +502,114 @@ export const InventoryPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              pagination={ledgerPagination}
+              onPageChange={setLedgerPage}
+              onLimitChange={setLedgerLimit}
+              loading={ledgerLoading}
+            />
           </div>
         </div>
       )}
 
       {/* Adjust Stock Modal */}
-      {isAdjustModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-          }}
-        >
-          <div className="glass-panel animate-fadeIn" style={{ maxWidth: '30rem', width: '100%', padding: '2rem', borderRadius: '1.25rem', backgroundColor: '#ffffff', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.35rem' }}>
-              Update Stock Quantity
-            </h3>
-            <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '1.25rem' }}>
-              Record a restock shipment or adjust quantity based on physical warehouse count.
-            </p>
-
-            {adjustError && (
-              <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem', marginBottom: '1rem' }}>
-                {adjustError}
-              </div>
-            )}
-
-            <form onSubmit={handleAdjustSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Select Product Variant
-                </label>
-                <select
-                  className="form-select"
-                  value={adjustData.variantId}
-                  onChange={(e) => setAdjustData({ ...adjustData, variantId: e.target.value })}
-                  required
-                >
-                  {stockItems.map((item) => (
-                    <option key={item.variantId || item.id} value={item.variantId || item.id}>
-                      {item.sku} — {item.productName} (Current: {item.stockQuantity})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Adjustment Reason
-                  </label>
-                  <select
-                    className="form-select"
-                    value={adjustData.type}
-                    onChange={(e) => setAdjustData({ ...adjustData, type: e.target.value as any })}
-                  >
-                    <option value="RESTOCK">Restock (New stock arrived)</option>
-                    <option value="ADJUSTMENT">Stock Count Adjustment</option>
-                    <option value="RETURN">Customer Return</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                    Quantity (+ / -) *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    className="form-input"
-                    value={adjustData.quantityChange}
-                    onChange={(e) => setAdjustData({ ...adjustData, quantityChange: e.target.value })}
-                    placeholder="e.g. 25 or -5"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
-                  Notes / Reference *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="form-input"
-                  value={adjustData.reason}
-                  onChange={(e) => setAdjustData({ ...adjustData, reason: e.target.value })}
-                  placeholder="e.g. Supplier delivery invoice #4092"
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsAdjustModalOpen(false)}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={adjustSubmitting}
-                  className="btn-primary"
-                  style={{ fontSize: '0.85rem' }}
-                >
-                  {adjustSubmitting ? 'Saving...' : 'Save Stock Update'}
-                </button>
-              </div>
-            </form>
+      <AdminModal
+        isOpen={isAdjustModalOpen}
+        onClose={() => setIsAdjustModalOpen(false)}
+        title="Update Stock Quantity"
+        subtitle="Record a restock shipment or adjust quantity based on physical warehouse count"
+        maxWidth="32rem"
+      >
+        {adjustError && (
+          <div style={{ padding: '0.65rem 1rem', borderRadius: '0.65rem', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '0.8rem' }}>
+            {adjustError}
           </div>
-        </div>
-      )}
+        )}
+
+        <form onSubmit={handleAdjustSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Select Product Variant
+            </label>
+            <select
+              className="form-select"
+              value={adjustData.variantId}
+              onChange={(e) => setAdjustData({ ...adjustData, variantId: e.target.value })}
+              required
+            >
+              {stockItems.map((item) => (
+                <option key={item.variantId || item.id} value={item.variantId || item.id}>
+                  {item.sku} — {item.productName} (Current: {item.stockQuantity})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Adjustment Reason
+              </label>
+              <select
+                className="form-select"
+                value={adjustData.type}
+                onChange={(e) => setAdjustData({ ...adjustData, type: e.target.value as any })}
+              >
+                <option value="RESTOCK">Restock (New stock arrived)</option>
+                <option value="ADJUSTMENT">Stock Count Adjustment</option>
+                <option value="RETURN">Customer Return</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+                Quantity (+ / -) *
+              </label>
+              <input
+                type="number"
+                required
+                className="form-input"
+                value={adjustData.quantityChange}
+                onChange={(e) => setAdjustData({ ...adjustData, quantityChange: e.target.value })}
+                placeholder="e.g. 25 or -5"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: '#334155', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Notes / Reference *
+            </label>
+            <input
+              type="text"
+              required
+              className="form-input"
+              value={adjustData.reason}
+              onChange={(e) => setAdjustData({ ...adjustData, reason: e.target.value })}
+              placeholder="e.g. Supplier delivery invoice #4092"
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
+            <button
+              type="button"
+              onClick={() => setIsAdjustModalOpen(false)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={adjustSubmitting}
+              className="btn-primary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              {adjustSubmitting ? 'Saving...' : 'Save Stock Update'}
+            </button>
+          </div>
+        </form>
+      </AdminModal>
     </div>
   );
 };

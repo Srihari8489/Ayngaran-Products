@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 
+import { OtpDeliveryService } from './otp-delivery.service';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -16,18 +18,28 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private otpDeliveryService: OtpDeliveryService,
   ) {}
 
   private hashOtp(otp: string): string {
     return crypto.createHash('sha256').update(otp).digest('hex');
   }
 
+  private normalizePhone(input: string): string {
+    const clean = input.trim();
+    if (clean.includes('@')) return clean.toLowerCase();
+    const digits = clean.replace(/\D/g, '');
+    if (digits.length === 10) return `+91${digits}`;
+    if (!clean.startsWith('+') && digits.length > 10) return `+${digits}`;
+    return clean.startsWith('+') ? clean : `+91${digits}`;
+  }
+
   // -------------------------------------------------------------
-  // CUSTOMER OTP WORKFLOW
+  // CUSTOMER OTP WORKFLOW (DEMO MODE READY)
   // -------------------------------------------------------------
 
-  async requestCustomerOtp(identifier: string) {
-    const cleanId = identifier.trim().toLowerCase();
+  async requestCustomerOtp(identifierOrPhone: string) {
+    const cleanId = this.normalizePhone(identifierOrPhone);
 
     // 1. Rate Limiting / Cooldown Check: 60 seconds
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
@@ -49,14 +61,20 @@ export class AuthService {
 
     // 2. Generate 6-Digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpHash = this.hashOtp(otp);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    /*
+      DEMO ONLY — plaintext OTP storage.
+      MUST be replaced with hashing before production.
+    */
+    const isHashingDisabled = process.env.OTP_HASHING === 'false' || process.env.WHATSAPP_OTP_MODE === 'DEMO';
+    const otpHashToStore = isHashingDisabled ? otp : this.hashOtp(otp);
 
     // 3. Save to immutable otp_requests ledger
     await this.prisma.raw.otpRequest.create({
       data: {
         identifier: cleanId,
-        otpHash,
+        otpHash: otpHashToStore,
         expiresAt,
         attempts: 0,
         isVerified: false,
@@ -67,25 +85,29 @@ export class AuthService {
     await this.prisma.raw.notificationLog.create({
       data: {
         recipient: cleanId,
-        channel: cleanId.includes('@') ? 'EMAIL' : 'SMS',
-        subject: 'Ayngaran Store Login Verification Code',
-        content: `Your Ayngaran Store verification code is: ${otp}. Valid for 5 minutes.`,
+        channel: 'WHATSAPP',
+        subject: 'Ayngaran Foods OTP Verification',
+        content: `Your Ayngaran Foods OTP is ${otp}. Valid for 5 minutes.`,
         status: 'SENT',
       },
     });
 
-    this.logger.log(`[DEV OTP] Verification code for ${cleanId}: ${otp}`);
+    this.logger.log(`[DEMO OTP] Code generated for ${cleanId}: ${otp}`);
+
+    // 5. Send OTP via OtpDeliveryService
+    const result = await this.otpDeliveryService.sendOtp(cleanId, otp);
 
     return {
-      message: 'OTP sent successfully to your mobile/email.',
+      success: true,
+      message: result.message,
+      demoWhatsAppUrl: result.demoWhatsAppUrl,
       identifier: cleanId,
       expiresInSeconds: 300,
-      devOtp: process.env.NODE_ENV !== 'production' ? otp : undefined,
     };
   }
 
-  async verifyCustomerOtp(identifier: string, otp: string) {
-    const cleanId = identifier.trim().toLowerCase();
+  async verifyCustomerOtp(identifierOrPhone: string, otp: string, name?: string) {
+    const cleanId = this.normalizePhone(identifierOrPhone);
 
     // 1. Find the latest active OTP request
     const otpRecord = await this.prisma.raw.otpRequest.findFirst({
@@ -106,18 +128,23 @@ export class AuthService {
       throw new BadRequestException('Maximum verification attempts exceeded. Please request a new OTP.');
     }
 
-    // 3. Verify OTP Hash
-    const hashedInput = this.hashOtp(otp.trim());
-    if (hashedInput !== otpRecord.otpHash) {
+    // 3. Verify OTP (Plaintext in DEMO mode, hashed in production)
+    const isHashingDisabled = process.env.OTP_HASHING === 'false' || process.env.WHATSAPP_OTP_MODE === 'DEMO';
+    const inputToCompare = isHashingDisabled ? otp.trim() : this.hashOtp(otp.trim());
+
+    if (inputToCompare !== otpRecord.otpHash) {
       await this.prisma.raw.otpRequest.update({
         where: { id: otpRecord.id },
         data: { attempts: { increment: 1 } },
       });
       const remainingAttempts = 2 - otpRecord.attempts;
+      if (remainingAttempts <= 0) {
+        throw new BadRequestException('Maximum verification attempts exceeded. Please request a new OTP.');
+      }
       throw new BadRequestException(`Invalid OTP. ${remainingAttempts} attempts remaining.`);
     }
 
-    // 4. Mark OTP as verified
+    // 4. Mark OTP as verified so it cannot be reused
     await this.prisma.raw.otpRequest.update({
       where: { id: otpRecord.id },
       data: { isVerified: true },
@@ -130,12 +157,15 @@ export class AuthService {
       include: { addresses: true, cart: { include: { items: true } } },
     });
 
+    const trimmedName = name?.trim();
+
     if (!user) {
       const userCode = `USR-${Date.now().toString(36).toUpperCase()}`;
+      const finalName = trimmedName || (isEmail ? cleanId.split('@')[0] : 'Customer');
       user = await this.prisma.client.user.create({
         data: {
           userCode,
-          name: isEmail ? cleanId.split('@')[0] : `Customer ${cleanId.slice(-4)}`,
+          name: finalName,
           email: isEmail ? cleanId : null,
           phone: !isEmail ? cleanId : null,
           isActive: true,
@@ -145,6 +175,16 @@ export class AuthService {
         },
         include: { addresses: true, cart: { include: { items: true } } },
       });
+    } else {
+      // If user exists, update their name if they supplied a name or if they have an autogenerated "Customer XXXX" name
+      const isAutoGenerated = !user.name || user.name.startsWith('Customer ') || user.name === 'Customer';
+      if (trimmedName && (isAutoGenerated || trimmedName !== user.name)) {
+        user = await this.prisma.client.user.update({
+          where: { id: user.id },
+          data: { name: trimmedName },
+          include: { addresses: true, cart: { include: { items: true } } },
+        });
+      }
     }
 
     // 6. Generate Tokens
@@ -337,5 +377,146 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+  }
+
+  // -------------------------------------------------------------
+  // CUSTOMER PROFILE MANAGEMENT
+  // -------------------------------------------------------------
+
+  async updateCustomerProfile(userId: number, data: { name?: string; email?: string }) {
+    const update: any = {};
+    if (data.name !== undefined) update.name = data.name.trim() || null;
+    if (data.email !== undefined && data.email.trim()) {
+      const cleanEmail = data.email.trim().toLowerCase();
+      const existing = await this.prisma.client.user.findFirst({
+        where: { email: cleanEmail, NOT: { id: userId } },
+      });
+      if (existing) {
+        throw new BadRequestException('This email address is already in use by another user account.');
+      }
+      update.email = cleanEmail;
+    } else if (data.email !== undefined) {
+      update.email = null;
+    }
+
+    try {
+      const updated = await this.prisma.client.user.update({
+        where: { id: userId },
+        data: update,
+        select: { id: true, userCode: true, name: true, email: true, phone: true },
+      });
+
+      return updated;
+    } catch (err: any) {
+      if (err.code === 'P2002') {
+        throw new BadRequestException('This email address is already in use by another user account.');
+      }
+      throw err;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // CUSTOMER ADDRESS MANAGEMENT
+  // -------------------------------------------------------------
+
+  async getCustomerAddresses(userId: number) {
+    return this.prisma.client.userAddress.findMany({
+      where: { userId, deletedAt: null },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async addCustomerAddress(userId: number, data: any) {
+    // If this is the first address or marked as default, ensure exclusive default
+    const existingCount = await this.prisma.client.userAddress.count({
+      where: { userId, deletedAt: null },
+    });
+
+    const isFirst = existingCount === 0;
+    const shouldBeDefault = isFirst || !!data.isDefault;
+
+    if (shouldBeDefault) {
+      // Clear existing defaults
+      await this.prisma.client.userAddress.updateMany({
+        where: { userId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    return this.prisma.client.userAddress.create({
+      data: {
+        userId,
+        recipientName: data.recipientName,
+        phone: data.phone,
+        addressLine1: data.addressLine1,
+        addressLine2: data.addressLine2 || null,
+        city: data.city,
+        state: data.state,
+        pincode: data.pincode,
+        country: data.country || 'India',
+        isDefault: shouldBeDefault,
+      },
+    });
+  }
+
+  async updateCustomerAddress(userId: number, addressId: number, data: any) {
+    // Verify ownership
+    const address = await this.prisma.client.userAddress.findFirst({
+      where: { id: addressId, userId, deletedAt: null },
+    });
+    if (!address) throw new BadRequestException('Address not found');
+
+    if (data.isDefault) {
+      await this.prisma.client.userAddress.updateMany({
+        where: { userId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    return this.prisma.client.userAddress.update({
+      where: { id: addressId },
+      data: {
+        recipientName: data.recipientName ?? address.recipientName,
+        phone: data.phone ?? address.phone,
+        addressLine1: data.addressLine1 ?? address.addressLine1,
+        addressLine2: data.addressLine2 !== undefined ? data.addressLine2 : address.addressLine2,
+        city: data.city ?? address.city,
+        state: data.state ?? address.state,
+        pincode: data.pincode ?? address.pincode,
+        country: data.country ?? address.country,
+        isDefault: data.isDefault !== undefined ? data.isDefault : address.isDefault,
+      },
+    });
+  }
+
+  async setDefaultAddress(userId: number, addressId: number) {
+    // Verify ownership
+    const address = await this.prisma.client.userAddress.findFirst({
+      where: { id: addressId, userId, deletedAt: null },
+    });
+    if (!address) throw new BadRequestException('Address not found');
+
+    // Clear all defaults, set this one
+    await this.prisma.client.userAddress.updateMany({
+      where: { userId },
+      data: { isDefault: false },
+    });
+
+    return this.prisma.client.userAddress.update({
+      where: { id: addressId },
+      data: { isDefault: true },
+    });
+  }
+
+  async deleteCustomerAddress(userId: number, addressId: number) {
+    const address = await this.prisma.client.userAddress.findFirst({
+      where: { id: addressId, userId, deletedAt: null },
+    });
+    if (!address) throw new BadRequestException('Address not found');
+
+    return this.prisma.client.userAddress.update({
+      where: { id: addressId },
+      data: { deletedAt: new Date() },
+    });
   }
 }
