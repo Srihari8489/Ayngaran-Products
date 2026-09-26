@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Param,
   Body,
@@ -83,7 +84,7 @@ export class OrdersController {
 
   @UseGuards(StaffJwtAuthGuard, PermissionsGuard)
   @RequirePermissions('DELIVERY_MANAGE')
-  @Post('admin/:id/assign-delivery')
+  @Post(['admin/:id/assign-delivery', 'admin/:id/delivery'])
   async assignDeliveryPartner(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignDeliveryDto,
@@ -91,4 +92,43 @@ export class OrdersController {
   ) {
     return this.ordersService.assignDeliveryPartner(id, dto, staff?.id);
   }
+
+  @UseGuards(StaffJwtAuthGuard, PermissionsGuard)
+  @RequirePermissions('DELIVERY_MANAGE')
+  @Put(['admin/:id/delivery', 'admin/:id/assign-delivery'])
+  async updateDeliveryPartner(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignDeliveryDto,
+    @CurrentStaff() staff: any,
+  ) {
+    return this.ordersService.assignDeliveryPartner(id, dto, staff?.id);
+  }
 }
+
+@Controller('admin/orders')
+export class AdminOrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @UseGuards(StaffJwtAuthGuard, PermissionsGuard)
+  @RequirePermissions('DELIVERY_MANAGE')
+  @Put(':id/delivery')
+  async updateDelivery(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignDeliveryDto,
+    @CurrentStaff() staff: any,
+  ) {
+    return this.ordersService.assignDeliveryPartner(id, dto, staff?.id);
+  }
+
+  @UseGuards(StaffJwtAuthGuard, PermissionsGuard)
+  @RequirePermissions('DELIVERY_MANAGE')
+  @Post(':id/assign-delivery')
+  async assignDelivery(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignDeliveryDto,
+    @CurrentStaff() staff: any,
+  ) {
+    return this.ordersService.assignDeliveryPartner(id, dto, staff?.id);
+  }
+}
+

@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { X, Printer, Download, FileText, CheckCircle2, Building2 } from 'lucide-react';
 import { Order } from '../types';
+import { resolveGstStateCode, SELLER_STATE_CODE } from '../utils/gst.util';
 
 interface OrderInvoiceModalProps {
   order: Order | any;
@@ -98,15 +99,64 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
 
   const isCod = order.paymentStatus === 'PENDING_COD' || (order.paymentMethod || '').toUpperCase().includes('COD');
 
-  const subtotal = Number(order.subtotal || order.totalAmount || 0);
+  const subtotal = Number(order.subtotal || 0);
   const shippingFee = Number(order.shippingFee || 0);
-  const taxAmount = Number(order.taxAmount || 0);
   const discountAmount = Number(order.discountAmount || 0);
   const grandTotal = Number(order.totalAmount || 0);
 
-  // Approximate 5% GST split if tax isn't itemized separately
-  const cgst = taxAmount > 0 ? (taxAmount / 2).toFixed(2) : '0.00';
-  const sgst = taxAmount > 0 ? (taxAmount / 2).toFixed(2) : '0.00';
+  // Determine Tax Jurisdiction using State Codes: Ayngaran Seller is Tamil Nadu (Code: 33)
+  const stateName = shippingAddr.state?.trim() || 'Tamil Nadu';
+  const customerStateCode = order.customerStateCode || shippingAddr.stateCode || resolveGstStateCode(stateName);
+  const supplyType = order.supplyType || (customerStateCode === SELLER_STATE_CODE ? 'INTRA_STATE' : 'INTER_STATE');
+  const isIntraState = supplyType === 'INTRA_STATE';
+
+  // Calculate itemized Reverse GST
+  const calculatedItems = items.map((item: any, idx: number) => {
+    const snap = item.snapshot || {};
+    const unitPrice = Number(item.unitPrice || 0);
+    const qty = Number(item.quantity || 1);
+    const lineGross = Number(item.totalPrice || unitPrice * qty);
+    const gstRate = item.gstRate !== undefined && item.gstRate !== null && Number(item.gstRate) > 0 ? Number(item.gstRate) : 5;
+
+    // Reverse GST Formula: Taxable Value = Line Gross / (1 + Rate / 100)
+    const taxableValue = item.taxableValue ?? Math.round((lineGross / (1 + gstRate / 100)) * 100) / 100;
+    const gstAmount = item.gstAmount ?? Math.round((lineGross - taxableValue) * 100) / 100;
+
+    const itemSupplyType = item.supplyType || snap.supplyType || supplyType;
+    const cgstAmount = itemSupplyType === 'INTRA_STATE'
+      ? (item.cgstAmount !== undefined ? Number(item.cgstAmount) : Math.round((gstAmount / 2) * 100) / 100)
+      : 0;
+    const sgstAmount = itemSupplyType === 'INTRA_STATE'
+      ? (item.sgstAmount !== undefined ? Number(item.sgstAmount) : Math.round((gstAmount - cgstAmount) * 100) / 100)
+      : 0;
+    const igstAmount = itemSupplyType === 'INTER_STATE'
+      ? (item.igstAmount !== undefined ? Number(item.igstAmount) : gstAmount)
+      : 0;
+
+    return {
+      ...item,
+      snap,
+      unitPrice,
+      qty,
+      lineGross,
+      gstRate,
+      taxableValue,
+      gstAmount,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+    };
+  });
+
+  const totalTaxable = order.taxableAmount !== undefined ? Number(order.taxableAmount) : Math.round(calculatedItems.reduce((acc, it) => acc + it.taxableValue, 0) * 100) / 100;
+  const totalGst = Number(order.taxAmount || calculatedItems.reduce((acc, it) => acc + it.gstAmount, 0));
+  const totalCgst = isIntraState ? (order.cgstAmount !== undefined ? Number(order.cgstAmount) : Math.round((totalGst / 2) * 100) / 100) : 0;
+  const totalSgst = isIntraState ? (order.sgstAmount !== undefined ? Number(order.sgstAmount) : Math.round((totalGst - totalCgst) * 100) / 100) : 0;
+  const totalIgst = !isIntraState ? (order.igstAmount !== undefined ? Number(order.igstAmount) : totalGst) : 0;
+
+  const rawGrandTotal = subtotal + shippingFee - discountAmount;
+  const roundGrandTotal = Math.round(Number(order.totalAmount || rawGrandTotal));
+  const roundOff = Math.round((roundGrandTotal - rawGrandTotal) * 100) / 100;
 
   const invoiceNumber = `INV-${order.orderNumber}`;
   const invoiceDate = order.createdAt
@@ -122,6 +172,9 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
       window.print();
       return;
     }
+
+    const absoluteLogoUrl = window.location.origin + '/Ayngaran_logo.png';
+    const printHtml = printContent.innerHTML.replace(/src="\/Ayngaran_logo\.png"/g, `src="${absoluteLogoUrl}"`);
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -199,7 +252,7 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
         </head>
         <body>
           <div class="invoice-box">
-            ${printContent.innerHTML}
+            ${printHtml}
           </div>
           <script>
             window.onload = function() {
@@ -343,14 +396,11 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
               }}
             >
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                   <img
                     src="/Ayngaran_logo.png"
-                    alt="Ayngaran Store"
-                    style={{ height: '42px', width: 'auto', objectFit: 'contain' }}
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = 'none';
-                    }}
+                    alt="Ayngaran Products"
+                    style={{ height: '48px', width: 'auto', objectFit: 'contain' }}
                   />
                   <div>
                     <h2
@@ -500,31 +550,34 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
             >
               <thead>
                 <tr style={{ backgroundColor: '#f1f5f9' }}>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', width: '35px', textAlign: 'center' }}>#</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', width: '30px', textAlign: 'center' }}>#</th>
                   <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Item &amp; Specifications</th>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'center', width: '80px' }}>HSN</th>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'center', width: '45px' }}>Qty</th>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'right', width: '85px' }}>Unit Price</th>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'center', width: '65px' }}>GST %</th>
-                  <th style={{ padding: '7px 8px', border: '1px solid #cbd5e1', textAlign: 'right', width: '90px' }}>Total (₹)</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'center', width: '60px' }}>HSN</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'center', width: '38px' }}>Qty</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '75px' }}>Rate (₹)</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '80px' }}>Taxable (₹)</th>
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'center', width: '50px' }}>GST</th>
+                  {isIntraState ? (
+                    <>
+                      <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '70px' }}>CGST (₹)</th>
+                      <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '70px' }}>SGST (₹)</th>
+                    </>
+                  ) : (
+                    <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '75px' }}>IGST (₹)</th>
+                  )}
+                  <th style={{ padding: '7px 6px', border: '1px solid #cbd5e1', textAlign: 'right', width: '85px' }}>Total (₹)</th>
                 </tr>
               </thead>
               <tbody>
-                {items.length === 0 ? (
+                {calculatedItems.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: '1.25rem', textAlign: 'center', color: '#64748b' }}>
+                    <td colSpan={isIntraState ? 10 : 9} style={{ padding: '1.25rem', textAlign: 'center', color: '#64748b' }}>
                       No items recorded in this order.
                     </td>
                   </tr>
                 ) : (
-                  items.map((item: any, idx: number) => {
-                    const snap = item.snapshot || {};
-                    const unitPrice = Number(item.unitPrice || 0);
-                    const qty = Number(item.quantity || 1);
-                    const lineTotal = Number(item.totalPrice || unitPrice * qty);
-                    const gstRate = item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : 5;
-
-                    // Collect variant attributes
+                  calculatedItems.map((item: any, idx: number) => {
+                    const snap = item.snap || {};
                     const attrDetails: string[] = [];
                     if (Array.isArray(item.attributes) && item.attributes.length > 0) {
                       item.attributes.forEach((a: any) => {
@@ -536,36 +589,48 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
 
                     return (
                       <tr key={item.id || idx} style={{ backgroundColor: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 600 }}>
                           {idx + 1}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '6px 8px', border: '1px solid #e2e8f0' }}>
                           <div style={{ fontWeight: 700, color: '#0f172a' }}>{snap.name || 'Ayngaran Product'}</div>
                           {attrDetails.length > 0 && (
                             <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
                               {attrDetails.join(' | ')}
                             </div>
                           )}
-                          {item.variant?.sku && (
-                            <div style={{ fontSize: '0.68rem', color: '#64748b', fontFamily: 'monospace' }}>
-                              SKU: {item.variant.sku}
-                            </div>
-                          )}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#64748b', fontFamily: 'monospace' }}>
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#64748b', fontFamily: 'monospace', fontSize: '10px' }}>
                           {snap.hsnCode || '210690'}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 700 }}>
-                          {qty}
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'center', fontWeight: 700 }}>
+                          {item.qty}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'right' }}>
-                          ₹{unitPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>
+                          ₹{Number(item.unitPrice).toFixed(2)}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#0369a1', fontWeight: 700 }}>
-                          {gstRate}%
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right', color: '#334155' }}>
+                          ₹{Number(item.taxableValue).toFixed(2)}
                         </td>
-                        <td style={{ padding: '7px 8px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 800, color: '#1a3d2b' }}>
-                          ₹{lineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#0369a1', fontWeight: 700 }}>
+                          {item.gstRate}%
+                        </td>
+                        {isIntraState ? (
+                          <>
+                            <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontSize: '10.5px' }}>
+                              ₹{Number(item.cgstAmount).toFixed(2)}
+                            </td>
+                            <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontSize: '10.5px' }}>
+                              ₹{Number(item.sgstAmount).toFixed(2)}
+                            </td>
+                          </>
+                        ) : (
+                          <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontSize: '10.5px' }}>
+                            ₹{Number(item.igstAmount).toFixed(2)}
+                          </td>
+                        )}
+                        <td style={{ padding: '6px 6px', border: '1px solid #e2e8f0', textAlign: 'right', fontWeight: 800, color: '#1a3d2b' }}>
+                          ₹{Number(item.lineGross).toFixed(2)}
                         </td>
                       </tr>
                     );
@@ -596,13 +661,40 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
                   </p>
                 </div>
 
-                {taxAmount > 0 && (
-                  <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.4 }}>
-                    <p style={{ margin: '0 0 2px', fontWeight: 700 }}>GST Tax Calculation Breakup (Intra-state):</p>
-                    <p style={{ margin: 0 }}>• CGST (Central Tax 2.5%): ₹{cgst}</p>
-                    <p style={{ margin: 0 }}>• SGST (State Tax 2.5%): ₹{sgst}</p>
-                  </div>
-                )}
+                <div style={{ fontSize: '0.74rem', color: '#475569', lineHeight: 1.45, backgroundColor: '#f8fafc', padding: '0.6rem 0.85rem', borderRadius: '0.4rem', border: '1px solid #e2e8f0' }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 700, color: '#1a3d2b' }}>
+                    GST Tax Jurisdiction: {isIntraState ? 'Tamil Nadu Supply (Intra-State • State Code: 33)' : `Interstate Supply (${stateName} • State Code: ${customerStateCode})`}
+                  </p>
+                  <p style={{ margin: '0 0 2px' }}>• Price Before Tax (Base): <strong>₹{totalTaxable.toFixed(2)}</strong></p>
+                  {isIntraState ? (
+                    <>
+                      <p style={{ margin: '0 0 2px' }}>• Central Govt Tax (CGST): <strong>₹{totalCgst.toFixed(2)}</strong></p>
+                      <p style={{ margin: '0 0 2px' }}>• State Govt Tax (SGST): <strong>₹{totalSgst.toFixed(2)}</strong></p>
+                      <p style={{ margin: 0 }}>• Total Tax (GST Included): <strong>₹{totalGst.toFixed(2)}</strong></p>
+                    </>
+                  ) : (
+                    <>
+                      <p style={{ margin: '0 0 2px' }}>• Integrated Interstate Tax (IGST): <strong>₹{totalIgst.toFixed(2)}</strong></p>
+                      <p style={{ margin: 0 }}>• Total Tax (GST Included): <strong>₹{totalGst.toFixed(2)}</strong></p>
+                    </>
+                  )}
+                  <p style={{ margin: '3px 0 0', color: '#166534', fontWeight: 700, fontSize: '0.72rem' }}>
+                    * All product prices are inclusive of GST. No extra tax charged.
+                  </p>
+                </div>
+
+                {/* Shipping & Delivery Calculation Summary */}
+                <div style={{ fontSize: '0.74rem', color: '#475569', lineHeight: 1.45, backgroundColor: '#f0fdf4', padding: '0.6rem 0.85rem', borderRadius: '0.4rem', border: '1px solid #bbf7d0' }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 800, color: '#166534' }}>
+                    Shipping & Delivery Calculation:
+                  </p>
+                  <p style={{ margin: '0 0 2px' }}>• Shipping Zone: <strong>{isIntraState ? 'Tamil Nadu (Intrastate Zone)' : `Outside Tamil Nadu (${stateName})`}</strong></p>
+                  <p style={{ margin: '0 0 2px' }}>• Order Weight: <strong>{Number(order.totalWeightGrams || 0) > 0 ? `${(Number(order.totalWeightGrams) / 1000).toFixed(2)} KG (${order.totalWeightGrams}g)` : '1.00 KG (1000g)'}</strong> → Billable Slab: <strong>{order.billableUnits || Math.max(1, Math.ceil(Number(order.totalWeightGrams || 1000) / 1000))} slab{(order.billableUnits || Math.max(1, Math.ceil(Number(order.totalWeightGrams || 1000) / 1000))) > 1 ? 's' : ''} ({(order.billableUnits || Math.max(1, Math.ceil(Number(order.totalWeightGrams || 1000) / 1000)))} × ₹{order.shippingRate || (isIntraState ? 60 : 120)})</strong></p>
+                  <p style={{ margin: '0 0 2px' }}>• Estimated Delivery: <strong>{order.estimatedDelivery || (isIntraState ? 'Within 2 days' : '3-5 days')}</strong></p>
+                  {(order.courierName || order.trackingNumber) && (
+                    <p style={{ margin: 0 }}>• Courier Partner: <strong>{order.courierName || 'Assigned'}</strong> {order.trackingNumber ? `• Tracking: ${order.trackingNumber}` : ''}</p>
+                  )}
+                </div>
               </div>
 
               {/* Right: Calculations Box */}
@@ -619,30 +711,58 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                  <span>Items Subtotal:</span>
-                  <span style={{ fontWeight: 700 }}>₹{subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  <span>Products Subtotal (All Taxes Included):</span>
+                  <span style={{ fontWeight: 700 }}>₹{subtotal.toFixed(2)}</span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontSize: '0.78rem' }}>
+                  <span>Price Before Tax (Base Value):</span>
+                  <span>₹{totalTaxable.toFixed(2)}</span>
+                </div>
+
+                {isIntraState ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', fontSize: '0.78rem' }}>
+                      <span>Central Govt Tax (CGST):</span>
+                      <span>₹{totalCgst.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', fontSize: '0.78rem' }}>
+                      <span>State Govt Tax (SGST):</span>
+                      <span>₹{totalSgst.toFixed(2)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1', fontSize: '0.78rem' }}>
+                    <span>Integrated Interstate Tax (IGST):</span>
+                    <span>₹{totalIgst.toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontSize: '0.78rem', borderBottom: '1px dashed #cbd5e1', paddingBottom: '3px' }}>
+                  <span style={{ fontWeight: 700 }}>Total Tax (Included in Subtotal):</span>
+                  <span style={{ fontWeight: 700 }}>₹{totalGst.toFixed(2)}</span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                  <span>Shipping &amp; Handling:</span>
+                  <span>Delivery Charges ({order.billableUnits || 1} slab{(order.billableUnits || 1) > 1 ? 's' : ''}):</span>
                   <span style={{ fontWeight: 700, color: shippingFee === 0 ? '#15803d' : 'inherit' }}>
-                    {shippingFee === 0 ? 'FREE' : `₹${shippingFee.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                    {shippingFee === 0 ? 'FREE' : `₹${shippingFee.toFixed(2)}`}
                   </span>
                 </div>
 
                 {discountAmount > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626' }}>
                     <span>Coupon / Discount:</span>
-                    <span style={{ fontWeight: 700 }}>-₹{discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    <span style={{ fontWeight: 700 }}>-₹{discountAmount.toFixed(2)}</span>
                   </div>
                 )}
 
-                {taxAmount > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                    <span>Total GST:</span>
-                    <span style={{ fontWeight: 700 }}>₹{taxAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#475569', fontSize: '0.82rem' }}>
+                  <span>Round Off:</span>
+                  <span style={{ fontWeight: 700 }}>
+                    {roundOff >= 0 ? `+₹${roundOff.toFixed(2)}` : `-₹${Math.abs(roundOff).toFixed(2)}`}
+                  </span>
+                </div>
 
                 <div
                   style={{
@@ -656,8 +776,8 @@ export const OrderInvoiceModal: React.FC<OrderInvoiceModalProps> = ({ order, onC
                     marginTop: '3px',
                   }}
                 >
-                  <span>Grand Total:</span>
-                  <span>₹{grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                  <span>Final Total Paid:</span>
+                  <span>₹{roundGrandTotal.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>

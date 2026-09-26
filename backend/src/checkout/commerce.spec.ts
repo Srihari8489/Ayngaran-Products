@@ -1,6 +1,7 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { CartService } from '../cart/cart.service';
 import { CheckoutService } from './checkout.service';
+import { ShippingService } from '../shipping/shipping.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ReportsService } from '../reports/reports.service';
@@ -11,8 +12,9 @@ async function testCommerceEngine() {
   const prisma = new PrismaService();
   await prisma.onModuleInit();
 
-  const cartService = new CartService(prisma);
-  const checkoutService = new CheckoutService(prisma);
+  const shippingService = new ShippingService(prisma);
+  const cartService = new CartService(prisma, shippingService);
+  const checkoutService = new CheckoutService(prisma, shippingService);
   const paymentsService = new PaymentsService(prisma);
   const reviewsService = new ReviewsService(prisma);
   const reportsService = new ReportsService(prisma);

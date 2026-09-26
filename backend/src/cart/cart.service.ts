@@ -4,11 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ShippingService } from '../shipping/shipping.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
+import { computeGstBreakdown } from '../common/utils/gst.util';
 
 @Injectable()
 export class CartService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private shippingService: ShippingService,
+  ) {}
 
   async getCart(userId: number) {
     let cart = await this.prisma.client.cart.findUnique({
@@ -84,15 +89,47 @@ export class CartService {
       const effectiveGstRate = item.product.useCategoryGst
         ? categoryGst
         : (item.product.gstRate !== null && item.product.gstRate !== undefined ? Number(item.product.gstRate) : categoryGst);
-      const itemGstAmount = Math.round(totalPrice * (effectiveGstRate / 100) * 100) / 100;
+      // Reverse GST calculation: Selling price is inclusive of GST
+      const itemTaxable = Math.round((totalPrice / (1 + effectiveGstRate / 100)) * 100) / 100;
+      const itemGstAmount = Math.round((totalPrice - itemTaxable) * 100) / 100;
 
       subtotal += totalPrice;
       taxAmount += itemGstAmount;
       totalItems += item.quantity;
 
-      const variantName = item.variant?.variantValues
-        .map((vv) => `${vv.attribute.name}: ${vv.attributeValue.displayName}`)
+      let variantName = item.variant?.variantValues
+        ?.map((vv) => {
+          const val = vv.attributeValue?.displayName || vv.attributeValue?.value;
+          if (!val) return null;
+          const attr = vv.attribute?.name;
+          if (attr && !['size', 'weight', 'package size', 'pack size', 'quantity', 'volume'].includes(attr.toLowerCase())) {
+            return `${attr}: ${val}`;
+          }
+          return val;
+        })
+        .filter(Boolean)
         .join(' / ');
+
+      if (!variantName && item.variant?.weight) {
+        const num = Number(item.variant.weight);
+        if (num > 0) {
+          if (num < 10) {
+            variantName = num < 1 ? `${Math.round(num * 1000)}g` : `${Number(num.toFixed(2))} KG`;
+          } else if (num >= 1000) {
+            variantName = `${Number((num / 1000).toFixed(2))} KG`;
+          } else {
+            variantName = `${Math.round(num)}g`;
+          }
+        }
+      }
+
+      if (!variantName && item.variant?.sku) {
+        const match = item.variant.sku.match(/(\d+(?:\.\d+)?)\s*(kg|kilo|g|gm|gram)\b/i);
+        if (match) {
+          const unit = match[2].toLowerCase().startsWith('k') ? ' KG' : 'g';
+          variantName = `${match[1]}${unit}`;
+        }
+      }
 
       return {
         id: item.id,
@@ -104,9 +141,11 @@ export class CartService {
         variantId: item.variantId,
         sku: item.variant?.sku || null,
         variantDescription: variantName || null,
+        variantWeight: item.variant?.weight ? Number(item.variant.weight) : null,
         quantity: item.quantity,
         unitPrice,
         totalPrice,
+        taxableValue: itemTaxable,
         gstRate: effectiveGstRate,
         gstAmount: itemGstAmount,
         currentStock,
@@ -120,13 +159,48 @@ export class CartService {
       };
     });
 
+    const userAddress = await this.prisma.client.userAddress.findFirst({
+      where: { userId },
+      orderBy: { isDefault: 'desc' },
+    });
+
+    const destinationState = userAddress?.state || 'Tamil Nadu';
+    const shippingCalc = await this.shippingService.calculateShipping({
+      destinationState,
+      items: items.map((it) => ({
+        variantId: it.variantId,
+        productId: it.productId,
+        quantity: it.quantity,
+      })),
+    });
+
+    const totalTaxable = Math.round(items.reduce((acc, it) => acc + it.taxableValue, 0) * 100) / 100;
+    const gstBreakdown = computeGstBreakdown(totalTaxable, taxAmount, destinationState);
+
     return {
       cartId: cart.id,
       items,
       totalItems,
       subtotal,
-      taxAmount: Math.round(taxAmount * 100) / 100,
+      taxableAmount: gstBreakdown.taxableAmount,
+      taxAmount: gstBreakdown.totalGst,
+      supplyType: gstBreakdown.supplyType,
+      sellerStateCode: gstBreakdown.sellerStateCode,
+      customerStateCode: gstBreakdown.customerStateCode,
+      cgstAmount: gstBreakdown.cgstAmount,
+      sgstAmount: gstBreakdown.sgstAmount,
+      igstAmount: gstBreakdown.igstAmount,
       allItemsAvailable,
+      shipping: {
+        shippingZone: shippingCalc.shippingZone,
+        destinationState: shippingCalc.destinationState,
+        totalWeightGrams: shippingCalc.totalWeightGrams,
+        billableWeightGrams: shippingCalc.billableWeightGrams,
+        billableUnits: shippingCalc.billableUnits,
+        ratePerUnit: shippingCalc.ratePerUnit,
+        shippingAmount: shippingCalc.shippingAmount,
+        estimatedDelivery: shippingCalc.estimatedDelivery,
+      },
     };
   }
 

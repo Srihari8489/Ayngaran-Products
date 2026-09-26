@@ -319,6 +319,9 @@ export class ProductsService {
       const totalStock = p.variants.reduce((acc, v) => acc + v.stockQuantity, 0);
       const categoryGst = Number(p.category?.gstRate ?? 5);
       const effectiveGstRate = p.useCategoryGst ? categoryGst : (p.gstRate !== null ? Number(p.gstRate) : categoryGst);
+      const minVariantPrice = p.variants.length > 0
+        ? Math.min(...p.variants.map((v) => Number(v.price)).filter((price) => !isNaN(price) && price > 0))
+        : Number(p.basePrice);
 
       return {
         id: p.id,
@@ -326,7 +329,7 @@ export class ProductsService {
         name: p.name,
         slug: p.slug,
         description: p.description,
-        basePrice: p.basePrice,
+        basePrice: minVariantPrice,
         status: p.status,
         minStockAlert: p.minStockAlert,
         useCategoryGst: p.useCategoryGst,
@@ -402,9 +405,13 @@ export class ProductsService {
     const totalStock = product.variants.reduce((acc, v) => acc + v.stockQuantity, 0);
     const categoryGst = Number(product.category?.gstRate ?? 5);
     const effectiveGstRate = product.useCategoryGst ? categoryGst : (product.gstRate !== null ? Number(product.gstRate) : categoryGst);
+    const minVariantPrice = product.variants.length > 0
+      ? Math.min(...product.variants.map((v) => Number(v.price)).filter((p) => !isNaN(p) && p > 0))
+      : Number(product.basePrice);
 
     return {
       ...product,
+      basePrice: minVariantPrice,
       useCategoryGst: product.useCategoryGst,
       gstRate: product.gstRate !== null && product.gstRate !== undefined ? Number(product.gstRate) : null,
       effectiveGstRate,

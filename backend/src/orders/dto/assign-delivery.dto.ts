@@ -1,9 +1,13 @@
 import { IsInt, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class AssignDeliveryDto {
+  @IsOptional()
   @IsInt()
-  @IsNotEmpty()
-  deliveryPartnerId: number;
+  deliveryPartnerId?: number;
+
+  @IsOptional()
+  @IsString()
+  courierName?: string;
 
   @IsOptional()
   @IsString()

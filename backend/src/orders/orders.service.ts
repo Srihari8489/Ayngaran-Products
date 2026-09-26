@@ -7,10 +7,60 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { AssignDeliveryDto } from './dto/assign-delivery.dto';
 import { createPaginatedResponse } from '../common/utils/pagination.util';
+import { computeGstBreakdown } from '../common/utils/gst.util';
 
 @Injectable()
 export class OrdersService {
   constructor(private prisma: PrismaService) { }
+
+  private computeShippingMetadata(order: any, mappedItems: any[], shippingAddress: any) {
+    const baseWeight = 1000;
+    let totalWeightGrams = Number(order.totalWeightGrams || 0);
+
+    if (totalWeightGrams <= 0) {
+      let calcWeight = 0;
+      for (const it of (mappedItems || [])) {
+        const snap = it.snapshot || {};
+        const label = `${snap.sku || ''} ${snap.variantLabel || ''} ${snap.name || ''}`;
+        let itemUnitWeight = 500;
+        const kgMatch = label.match(/(\d+(?:\.\d+)?)\s*(?:kg|kilo)/i);
+        const gMatch = label.match(/(\d+(?:\.\d+)?)\s*(?:g|gm|gram)/i);
+        if (kgMatch) {
+          itemUnitWeight = Math.round(parseFloat(kgMatch[1]) * 1000);
+        } else if (gMatch) {
+          itemUnitWeight = Math.round(parseFloat(gMatch[1]));
+        } else if (snap.weight) {
+          const w = Number(snap.weight);
+          itemUnitWeight = w < 10 ? Math.round(w * 1000) : Math.round(w);
+        }
+
+        const qty = Math.max(1, Number(it.quantity) || 1);
+        calcWeight += itemUnitWeight * qty;
+      }
+
+      totalWeightGrams = calcWeight;
+    }
+
+    // Billable slabs: Math.max(1, Math.ceil(totalWeightGrams / 1000))
+    const billableUnits = Math.max(1, Math.ceil(totalWeightGrams / baseWeight));
+    const billableWeightGrams = billableUnits * baseWeight;
+
+    const stateStr = (shippingAddress?.state || '').toLowerCase();
+    const isTN = order.shippingZone === 'TAMIL_NADU' || stateStr.includes('tamil') || stateStr === 'tn' || stateStr.includes('nadu');
+    const shippingZone = isTN ? 'TAMIL_NADU' : 'OUTSIDE_TAMIL_NADU';
+    const defaultRate = isTN ? 60 : 120;
+    const shippingRate = order.shippingRate ? Number(order.shippingRate) : defaultRate;
+    const estimatedDelivery = order.estimatedDelivery || (isTN ? 'Within 2 days' : '3-5 days');
+
+    return {
+      totalWeightGrams,
+      billableWeightGrams,
+      billableUnits,
+      shippingZone,
+      shippingRate,
+      estimatedDelivery,
+    };
+  }
 
   // -------------------------------------------------------------
   // CUSTOMER ORDER WORKFLOWS
@@ -46,31 +96,72 @@ export class OrdersService {
         }
       }
 
-      return {
-        id: o.id,
-        orderNumber: o.orderNumber,
-        subtotal: Number(o.subtotal),
-        shippingFee: Number(o.shippingFee),
-        taxAmount: Number(o.taxAmount),
-        discountAmount: Number(o.discountAmount || 0),
-        totalAmount: Number(o.totalAmount),
-        orderStatus: o.orderStatus,
-        paymentStatus: o.paymentStatus,
-        shippingAddress,
-        billingAddress,
-        itemCount: o.items.reduce((acc, i) => acc + i.quantity, 0),
-        items: o.items.map((i) => ({
+      const mappedItems = o.items.map((i) => {
+        let snap: any = null;
+        try {
+          snap = JSON.parse(i.productSnapshotJson);
+        } catch {
+          snap = null;
+        }
+        const totalPrice = Number(i.totalPrice);
+        const gstRate = Number(i.gstRate || 0);
+        const gstAmount = Number(i.gstAmount || 0);
+        const taxableValue = snap?.taxableValue ?? Math.round((totalPrice / (1 + (gstRate || 5) / 100)) * 100) / 100;
+        const itemGst = computeGstBreakdown(taxableValue, gstAmount, shippingAddress?.state);
+
+        return {
           id: i.id,
           productId: i.productId,
           variantId: i.variantId,
           quantity: i.quantity,
           unitPrice: Number(i.unitPrice),
-          totalPrice: Number(i.totalPrice),
-          gstRate: Number(i.gstRate || 0),
-          gstAmount: Number(i.gstAmount || 0),
-          snapshot: JSON.parse(i.productSnapshotJson),
-        })),
+          totalPrice,
+          taxableValue,
+          gstRate,
+          gstAmount,
+          supplyType: snap?.supplyType || itemGst.supplyType,
+          cgstAmount: snap?.cgstAmount !== undefined ? Number(snap.cgstAmount) : itemGst.cgstAmount,
+          sgstAmount: snap?.sgstAmount !== undefined ? Number(snap.sgstAmount) : itemGst.sgstAmount,
+          igstAmount: snap?.igstAmount !== undefined ? Number(snap.igstAmount) : itemGst.igstAmount,
+          snapshot: snap,
+        };
+      });
+
+      const totalTaxable = Math.round(mappedItems.reduce((acc, it) => acc + it.taxableValue, 0) * 100) / 100;
+      const totalTax = Number(o.taxAmount || 0);
+      const orderGst = computeGstBreakdown(totalTaxable, totalTax, shippingAddress?.state);
+      const shipMeta = this.computeShippingMetadata(o, mappedItems, shippingAddress);
+
+      return {
+        id: o.id,
+        orderNumber: o.orderNumber,
+        subtotal: Number(o.subtotal),
+        shippingFee: Number(o.shippingFee),
+        taxableAmount: shippingAddress?.taxableAmount !== undefined ? Number(shippingAddress.taxableAmount) : orderGst.taxableAmount,
+        taxAmount: totalTax,
+        discountAmount: Number(o.discountAmount || 0),
+        totalAmount: Number(o.totalAmount),
+        supplyType: shippingAddress?.supplyType || orderGst.supplyType,
+        sellerStateCode: '33',
+        customerStateCode: shippingAddress?.stateCode || orderGst.customerStateCode,
+        cgstAmount: shippingAddress?.cgstAmount !== undefined ? Number(shippingAddress.cgstAmount) : orderGst.cgstAmount,
+        sgstAmount: shippingAddress?.sgstAmount !== undefined ? Number(shippingAddress.sgstAmount) : orderGst.sgstAmount,
+        igstAmount: shippingAddress?.igstAmount !== undefined ? Number(shippingAddress.igstAmount) : orderGst.igstAmount,
+        orderStatus: o.orderStatus,
+        paymentStatus: o.paymentStatus,
+        shippingAddress,
+        billingAddress,
+        itemCount: o.items.reduce((acc, i) => acc + i.quantity, 0),
+        items: mappedItems,
         delivery: o.deliveryAssignments[0] || null,
+        shippingZone: shipMeta.shippingZone,
+        totalWeightGrams: shipMeta.totalWeightGrams,
+        billableWeightGrams: shipMeta.billableWeightGrams,
+        billableUnits: shipMeta.billableUnits,
+        shippingRate: shipMeta.shippingRate,
+        estimatedDelivery: shipMeta.estimatedDelivery,
+        courierName: (o as any).courierName || (o.deliveryAssignments[o.deliveryAssignments.length - 1] as any)?.courierName || (o.deliveryAssignments[o.deliveryAssignments.length - 1] as any)?.deliveryPartner?.name || null,
+        trackingNumber: (o as any).trackingNumber || (o.deliveryAssignments[o.deliveryAssignments.length - 1] as any)?.trackingNumber || null,
         createdAt: o.createdAt,
       };
     });
@@ -90,26 +181,77 @@ export class OrdersService {
 
     if (!order) throw new NotFoundException('Order not found');
 
-    return {
-      id: order.id,
-      orderNumber: order.orderNumber,
-      subtotal: Number(order.subtotal),
-      shippingFee: Number(order.shippingFee),
-      taxAmount: Number(order.taxAmount),
-      totalAmount: Number(order.totalAmount),
-      orderStatus: order.orderStatus,
-      paymentStatus: order.paymentStatus,
-      shippingAddress: JSON.parse(order.shippingAddressJson),
-      billingAddress: order.billingAddressJson ? JSON.parse(order.billingAddressJson) : null,
-      items: order.items.map((i) => ({
+    let shippingAddress: any = null;
+    try {
+      shippingAddress = JSON.parse(order.shippingAddressJson);
+    } catch {
+      shippingAddress = null;
+    }
+
+    let billingAddress: any = null;
+    if (order.billingAddressJson) {
+      try {
+        billingAddress = JSON.parse(order.billingAddressJson);
+      } catch {
+        billingAddress = null;
+      }
+    }
+
+    const mappedItems = order.items.map((i) => {
+      let snap: any = null;
+      try {
+        snap = JSON.parse(i.productSnapshotJson);
+      } catch {
+        snap = null;
+      }
+      const totalPrice = Number(i.totalPrice);
+      const gstRate = Number(i.gstRate || 0);
+      const gstAmount = Number(i.gstAmount || 0);
+      const taxableValue = snap?.taxableValue ?? Math.round((totalPrice / (1 + (gstRate || 5) / 100)) * 100) / 100;
+      const itemGst = computeGstBreakdown(taxableValue, gstAmount, shippingAddress?.state);
+
+      return {
         id: i.id,
         productId: i.productId,
         variantId: i.variantId,
         quantity: i.quantity,
         unitPrice: Number(i.unitPrice),
-        totalPrice: Number(i.totalPrice),
-        snapshot: JSON.parse(i.productSnapshotJson),
-      })),
+        totalPrice,
+        taxableValue,
+        gstRate,
+        gstAmount,
+        supplyType: snap?.supplyType || itemGst.supplyType,
+        cgstAmount: snap?.cgstAmount !== undefined ? Number(snap.cgstAmount) : itemGst.cgstAmount,
+        sgstAmount: snap?.sgstAmount !== undefined ? Number(snap.sgstAmount) : itemGst.sgstAmount,
+        igstAmount: snap?.igstAmount !== undefined ? Number(snap.igstAmount) : itemGst.igstAmount,
+        snapshot: snap,
+      };
+    });
+
+    const totalTaxable = Math.round(mappedItems.reduce((acc, it) => acc + it.taxableValue, 0) * 100) / 100;
+    const totalTax = Number(order.taxAmount || 0);
+    const orderGst = computeGstBreakdown(totalTaxable, totalTax, shippingAddress?.state);
+    const shipMeta = this.computeShippingMetadata(order, mappedItems, shippingAddress);
+
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      subtotal: Number(order.subtotal),
+      shippingFee: Number(order.shippingFee),
+      taxableAmount: shippingAddress?.taxableAmount !== undefined ? Number(shippingAddress.taxableAmount) : orderGst.taxableAmount,
+      taxAmount: totalTax,
+      totalAmount: Number(order.totalAmount),
+      supplyType: shippingAddress?.supplyType || orderGst.supplyType,
+      sellerStateCode: '33',
+      customerStateCode: shippingAddress?.stateCode || orderGst.customerStateCode,
+      cgstAmount: shippingAddress?.cgstAmount !== undefined ? Number(shippingAddress.cgstAmount) : orderGst.cgstAmount,
+      sgstAmount: shippingAddress?.sgstAmount !== undefined ? Number(shippingAddress.sgstAmount) : orderGst.sgstAmount,
+      igstAmount: shippingAddress?.igstAmount !== undefined ? Number(shippingAddress.igstAmount) : orderGst.igstAmount,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      shippingAddress,
+      billingAddress,
+      items: mappedItems,
       payments: order.payments.map((p) => ({
         id: p.id,
         gatewayCode: p.gatewayCode,
@@ -119,6 +261,14 @@ export class OrdersService {
         verifiedAt: p.verifiedAt,
       })),
       deliveryAssignments: order.deliveryAssignments,
+      shippingZone: shipMeta.shippingZone,
+      totalWeightGrams: shipMeta.totalWeightGrams,
+      billableWeightGrams: shipMeta.billableWeightGrams,
+      billableUnits: shipMeta.billableUnits,
+      shippingRate: shipMeta.shippingRate,
+      estimatedDelivery: shipMeta.estimatedDelivery,
+      courierName: (order as any).courierName || (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.courierName || (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.deliveryPartner?.name || null,
+      trackingNumber: (order as any).trackingNumber || (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.trackingNumber || null,
       createdAt: order.createdAt,
     };
   }
@@ -469,6 +619,36 @@ export class OrdersService {
 
               totalPrice: Number(i.totalPrice),
 
+              taxableValue: snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+
+              gstRate: Number(i.gstRate || 0),
+
+              gstAmount: Number(i.gstAmount || 0),
+
+              supplyType: snap?.supplyType || computeGstBreakdown(
+                snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+                Number(i.gstAmount || 0),
+                address?.state,
+              ).supplyType,
+
+              cgstAmount: snap?.cgstAmount !== undefined ? Number(snap.cgstAmount) : computeGstBreakdown(
+                snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+                Number(i.gstAmount || 0),
+                address?.state,
+              ).cgstAmount,
+
+              sgstAmount: snap?.sgstAmount !== undefined ? Number(snap.sgstAmount) : computeGstBreakdown(
+                snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+                Number(i.gstAmount || 0),
+                address?.state,
+              ).sgstAmount,
+
+              igstAmount: snap?.igstAmount !== undefined ? Number(snap.igstAmount) : computeGstBreakdown(
+                snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+                Number(i.gstAmount || 0),
+                address?.state,
+              ).igstAmount,
+
               // Historical product information
               snapshot: snap,
 
@@ -506,6 +686,12 @@ export class OrdersService {
         // Return Order
         // ---------------------------------------------------------
 
+        const totalTaxable = Math.round(mappedItems.reduce((acc: number, it: any) => acc + (it.taxableValue || 0), 0) * 100) / 100;
+        const totalTax = Number(o.taxAmount || 0);
+        const orderGst = computeGstBreakdown(totalTaxable, totalTax, address?.state);
+
+        const shipMeta = this.computeShippingMetadata(o, mappedItems, address);
+
         return {
           id: o.id,
 
@@ -524,9 +710,23 @@ export class OrdersService {
 
           shippingFee: Number(o.shippingFee),
 
-          taxAmount: Number(o.taxAmount),
+          taxableAmount: address?.taxableAmount !== undefined ? Number(address.taxableAmount) : orderGst.taxableAmount,
+
+          taxAmount: totalTax,
 
           totalAmount: Number(o.totalAmount),
+
+          supplyType: address?.supplyType || orderGst.supplyType,
+
+          sellerStateCode: '33',
+
+          customerStateCode: address?.stateCode || orderGst.customerStateCode,
+
+          cgstAmount: address?.cgstAmount !== undefined ? Number(address.cgstAmount) : orderGst.cgstAmount,
+
+          sgstAmount: address?.sgstAmount !== undefined ? Number(address.sgstAmount) : orderGst.sgstAmount,
+
+          igstAmount: address?.igstAmount !== undefined ? Number(address.igstAmount) : orderGst.igstAmount,
 
           orderStatus: o.orderStatus,
 
@@ -554,8 +754,9 @@ export class OrdersService {
             : null,
 
           deliveryPartner:
-            o.deliveryAssignments[0]
-              ?.deliveryPartner?.name ||
+            (o as any).courierName ||
+            (o.deliveryAssignments[0] as any)?.courierName ||
+            (o.deliveryAssignments[0] as any)?.deliveryPartner?.name ||
             'Unassigned',
 
           deliveryStatus:
@@ -563,8 +764,30 @@ export class OrdersService {
             'UNASSIGNED',
 
           trackingNumber:
-            o.deliveryAssignments[0]
-              ?.trackingNumber || null,
+            (o as any).trackingNumber ||
+            (o.deliveryAssignments[0] as any)?.trackingNumber || null,
+
+          courierName:
+            (o as any).courierName ||
+            (o.deliveryAssignments[0] as any)?.courierName || null,
+
+          shippingZone:
+            shipMeta.shippingZone,
+
+          totalWeightGrams:
+            shipMeta.totalWeightGrams,
+
+          billableWeightGrams:
+            shipMeta.billableWeightGrams,
+
+          billableUnits:
+            shipMeta.billableUnits,
+
+          shippingRate:
+            shipMeta.shippingRate,
+
+          estimatedDelivery:
+            shipMeta.estimatedDelivery,
 
           createdAt: o.createdAt,
         };
@@ -817,6 +1040,36 @@ export class OrdersService {
 
           totalPrice: Number(i.totalPrice),
 
+          taxableValue: snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+
+          gstRate: Number(i.gstRate || 0),
+
+          gstAmount: Number(i.gstAmount || 0),
+
+          supplyType: snap?.supplyType || computeGstBreakdown(
+            snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+            Number(i.gstAmount || 0),
+            address?.state,
+          ).supplyType,
+
+          cgstAmount: snap?.cgstAmount !== undefined ? Number(snap.cgstAmount) : computeGstBreakdown(
+            snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+            Number(i.gstAmount || 0),
+            address?.state,
+          ).cgstAmount,
+
+          sgstAmount: snap?.sgstAmount !== undefined ? Number(snap.sgstAmount) : computeGstBreakdown(
+            snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+            Number(i.gstAmount || 0),
+            address?.state,
+          ).sgstAmount,
+
+          igstAmount: snap?.igstAmount !== undefined ? Number(snap.igstAmount) : computeGstBreakdown(
+            snap?.taxableValue ?? Math.round((Number(i.totalPrice) / (1 + (Number(i.gstRate || 0) || 5) / 100)) * 100) / 100,
+            Number(i.gstAmount || 0),
+            address?.state,
+          ).igstAmount,
+
           // Historical product information
           snapshot: snap,
 
@@ -854,85 +1107,63 @@ export class OrdersService {
     // Return Complete Admin Order Details
     // -----------------------------------------------------------
 
+    const totalTaxable = Math.round(mappedItems.reduce((acc: number, it: any) => acc + (it.taxableValue || 0), 0) * 100) / 100;
+    const totalTax = Number(order.taxAmount || 0);
+    const orderGst = computeGstBreakdown(totalTaxable, totalTax, address?.state);
+
+    const shipMeta = this.computeShippingMetadata(order, mappedItems, address);
+
     return {
       id: order.id,
-
-      orderNumber:
-        order.orderNumber,
-
+      orderNumber: order.orderNumber,
       user: customerObj,
-
       customer: customerObj,
-
-      subtotal:
-        Number(order.subtotal),
-
-      shippingFee:
-        Number(order.shippingFee),
-
-      taxAmount:
-        Number(order.taxAmount),
-
-      totalAmount:
-        Number(order.totalAmount),
-
-      orderStatus:
-        order.orderStatus,
-
-      paymentStatus:
-        order.paymentStatus,
-
-      shippingAddress:
-        address,
-
-      billingAddress:
-        order.billingAddressJson
-          ? JSON.parse(
-            order.billingAddressJson,
-          )
-          : null,
-
-      notes:
-        order.notes,
-
-      itemCount:
-        order.items.reduce(
-          (acc, i) =>
-            acc + i.quantity,
-          0,
-        ),
-
-      items:
-        mappedItems,
-
-      payments:
-        order.payments.map((p) => ({
-          id: p.id,
-
-          gatewayCode:
-            p.gatewayCode,
-
-          transactionId:
-            p.transactionId,
-
-          amount:
-            Number(p.amount),
-
-          currency:
-            p.currency,
-
-          status:
-            p.status,
-
-          verifiedAt:
-            p.verifiedAt,
-        })),
-
-      deliveryAssignments:
-        order.deliveryAssignments,
-
-      createdAt:
-        order.createdAt,
+      subtotal: Number(order.subtotal),
+      shippingFee: Number(order.shippingFee),
+      taxableAmount: address?.taxableAmount !== undefined ? Number(address.taxableAmount) : orderGst.taxableAmount,
+      taxAmount: totalTax,
+      totalAmount: Number(order.totalAmount),
+      supplyType: address?.supplyType || orderGst.supplyType,
+      sellerStateCode: '33',
+      customerStateCode: address?.stateCode || orderGst.customerStateCode,
+      cgstAmount: address?.cgstAmount !== undefined ? Number(address.cgstAmount) : orderGst.cgstAmount,
+      sgstAmount: address?.sgstAmount !== undefined ? Number(address.sgstAmount) : orderGst.sgstAmount,
+      igstAmount: address?.igstAmount !== undefined ? Number(address.igstAmount) : orderGst.igstAmount,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      shippingAddress: address,
+      billingAddress: order.billingAddressJson
+        ? JSON.parse(order.billingAddressJson)
+        : null,
+      notes: order.notes,
+      itemCount: order.items.reduce((acc, i) => acc + i.quantity, 0),
+      items: mappedItems,
+      payments: order.payments.map((p) => ({
+        id: p.id,
+        gatewayCode: p.gatewayCode,
+        transactionId: p.transactionId,
+        amount: Number(p.amount),
+        currency: p.currency,
+        status: p.status,
+        verifiedAt: p.verifiedAt,
+      })),
+      deliveryAssignments: order.deliveryAssignments,
+      shippingZone: shipMeta.shippingZone,
+      totalWeightGrams: shipMeta.totalWeightGrams,
+      billableWeightGrams: shipMeta.billableWeightGrams,
+      billableUnits: shipMeta.billableUnits,
+      shippingRate: shipMeta.shippingRate,
+      estimatedDelivery: shipMeta.estimatedDelivery,
+      courierName:
+        (order as any).courierName ||
+        (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.courierName ||
+        (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.deliveryPartner?.name ||
+        null,
+      trackingNumber:
+        (order as any).trackingNumber ||
+        (order.deliveryAssignments[order.deliveryAssignments.length - 1] as any)?.trackingNumber ||
+        null,
+      createdAt: order.createdAt,
     };
   }
 
@@ -982,29 +1213,49 @@ export class OrdersService {
     const order = await this.prisma.client.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Order not found');
 
-    const partner = await this.prisma.client.deliveryPartner.findUnique({
-      where: { id: dto.deliveryPartnerId },
-    });
-    if (!partner) throw new NotFoundException('Delivery partner not found');
+    const courierName = dto.courierName?.trim() || null;
+    const trackingNumber = dto.trackingNumber?.trim() || null;
+    const deliveryPartnerId = dto.deliveryPartnerId || null;
 
-    const trackingNumber =
-      dto.trackingNumber || `TRK-${partner.partnerCode.split('-')[1]}-${Math.floor(10000000 + Math.random() * 90000000)}`;
-
-    const assignment = await this.prisma.client.orderDeliveryAssignment.create({
-      data: {
-        orderId,
-        deliveryPartnerId: dto.deliveryPartnerId,
-        trackingNumber,
-        status: 'ASSIGNED',
-        notes: dto.notes || null,
-      },
-      include: { deliveryPartner: true },
+    // Check if an existing assignment exists for this order
+    const existingAssignment = await this.prisma.client.orderDeliveryAssignment.findFirst({
+      where: { orderId },
+      orderBy: { id: 'desc' },
     });
 
-    // Automatically transition order to PROCESSING or PACKED
+    let assignment;
+    if (existingAssignment) {
+      assignment = await this.prisma.client.orderDeliveryAssignment.update({
+        where: { id: existingAssignment.id },
+        data: {
+          deliveryPartnerId,
+          courierName,
+          trackingNumber,
+          notes: dto.notes || existingAssignment.notes,
+        } as any,
+        include: { deliveryPartner: true },
+      });
+    } else {
+      assignment = await this.prisma.client.orderDeliveryAssignment.create({
+        data: {
+          orderId,
+          deliveryPartnerId,
+          courierName,
+          trackingNumber,
+          status: 'ASSIGNED',
+          notes: dto.notes || null,
+        } as any,
+        include: { deliveryPartner: true },
+      });
+    }
+
+    // Update order snapshot columns directly
     await this.prisma.client.order.update({
       where: { id: orderId },
-      data: { orderStatus: 'PACKED' },
+      data: {
+        courierName,
+        trackingNumber,
+      } as any,
     });
 
     // Write audit log
@@ -1015,7 +1266,7 @@ export class OrdersService {
         entityType: 'Order',
         entityId: String(orderId),
         newValueJson: JSON.stringify({
-          partner: partner.name,
+          courierName,
           trackingNumber,
         }),
       },

@@ -20,6 +20,7 @@ import { AuditLogsPage } from './pages/AuditLogsPage';
 import { InquiriesPage } from './pages/InquiriesPage';
 import { SubscribersPage } from './pages/SubscribersPage';
 import { UsersPage } from './pages/UsersPage';
+import { ShippingSettingsPage } from './pages/ShippingSettingsPage';
 
 // Protected Route Guard
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -68,6 +69,7 @@ export const App: React.FC = () => {
             <Route path="inquiries" element={<InquiriesPage />} />
             <Route path="feedbacks" element={<FeedbacksPage />} />
             <Route path="subscribers" element={<SubscribersPage />} />
+            <Route path="shipping-settings" element={<ShippingSettingsPage />} />
             <Route path="delivery-partners" element={<DeliveryPartnersPage />} />
             <Route path="gateways" element={<GatewaysPage />} />
             <Route path="reviews" element={<ReviewsPage />} />

@@ -286,12 +286,9 @@ export const ProductDetailPage: React.FC = () => {
 
         {/* Right Column: Information, Variants & Cart */}
         <div>
-          {/* Brand & Product Code */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+          {/* Brand */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.35rem' }}>
             <span className="badge badge-primary" style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem' }}>{product.brand.name}</span>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-              CODE: {product.productCode}
-            </span>
           </div>
 
           <h1 style={{ fontSize: '1.55rem', fontWeight: 800, lineHeight: 1.25, marginBottom: '0.45rem', color: '#0f172a' }}>
@@ -321,34 +318,19 @@ export const ProductDetailPage: React.FC = () => {
             );
           })()}
 
-          {/* Price & Real-Time Stock Status */}
+          {/* Price */}
           <div style={{ padding: '0.85rem 1.15rem', backgroundColor: '#f8fafc', borderRadius: '0.85rem', border: '1px solid var(--border-color)', marginBottom: '1.15rem' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.65rem', marginBottom: '0.35rem' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.65rem' }}>
               <span style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--primary-700)' }}>
                 ₹{currentPrice.toLocaleString()}
               </span>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Inclusive of all taxes</span>
             </div>
-
-            {/* Authoritative Availability Notice */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem' }}>
-              {isOutOfStock ? (
+            {isOutOfStock && (
+              <div style={{ marginTop: '0.4rem' }}>
                 <span className="badge badge-danger">Out of Stock</span>
-              ) : isLowStock ? (
-                <span className="badge badge-warning">
-                  <AlertTriangle size={12} /> Only {currentStock} units left!
-                </span>
-              ) : (
-                <span className="badge badge-success">
-                  <CheckCircle2 size={12} /> In Stock ({currentStock} available)
-                </span>
-              )}
-              {selectedVariant && (
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  SKU: {selectedVariant.sku}
-                </span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Variant Selector */}
@@ -380,7 +362,7 @@ export const ProductDetailPage: React.FC = () => {
                         cursor: 'pointer',
                       }}
                     >
-                      {label || v.sku}
+                      {label || ((v as any).weight ? `${(v as any).weight}g` : 'Standard')}
                     </button>
                   );
                 })}
@@ -471,46 +453,6 @@ export const ProductDetailPage: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Dynamic Product Specifications Table */}
-      <section style={{ marginBottom: '4rem' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '1.25rem' }}>Technical Specifications</h2>
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '1rem', border: '1px solid var(--border-color)', overflow: 'hidden' }}>
-          {product.attributeValues && product.attributeValues.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-              <tbody>
-                {product.attributeValues.map((attr, idx) => {
-                  const val =
-                    attr.attributeValue?.displayName ||
-                    attr.valueText ||
-                    (attr.valueNumber !== null && attr.valueNumber !== undefined
-                      ? `${attr.valueNumber} ${attr.attribute.unit || ''}`
-                      : attr.valueBoolean ? 'Yes' : 'No');
-
-                  return (
-                    <tr
-                      key={attr.attributeId}
-                      style={{
-                        backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
-                        borderBottom: '1px solid var(--border-color)',
-                      }}
-                    >
-                      <td style={{ padding: '0.85rem 1.25rem', width: '30%', fontWeight: 600, color: 'var(--text-muted)' }}>
-                        {attr.attribute.name}
-                      </td>
-                      <td style={{ padding: '0.85rem 1.25rem', fontWeight: 500 }}>
-                        {val}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <p style={{ padding: '1.5rem', color: 'var(--text-muted)' }}>Standard factory specifications apply.</p>
-          )}
-        </div>
-      </section>
 
       {/* Verified Reviews Section */}
       <section>

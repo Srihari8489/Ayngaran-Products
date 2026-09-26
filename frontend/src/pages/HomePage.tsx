@@ -51,6 +51,32 @@ export const HomePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const collectionsRowRef = useRef<HTMLDivElement>(null);
 
+  // Circular Hero Image Carousel (Slides product images smoothly inside the circle)
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+
+  const heroCarouselImages = useMemo(() => {
+    const list: { url: string; title: string }[] = [
+      { url: '/traditional_spices.jpg', title: 'Traditional Spices & Ingredients' },
+    ];
+    if (allProducts && allProducts.length > 0) {
+      allProducts.forEach((p) => {
+        const img = p.primaryImage || p.images?.[0]?.url;
+        if (img && !list.some((item) => item.url === img)) {
+          list.push({ url: img, title: p.name });
+        }
+      });
+    }
+    return list.slice(0, 8);
+  }, [allProducts]);
+
+  useEffect(() => {
+    if (heroCarouselImages.length <= 1) return;
+    const timer = setInterval(() => {
+      setHeroSlideIndex((prev) => (prev + 1) % heroCarouselImages.length);
+    }, 3200);
+    return () => clearInterval(timer);
+  }, [heroCarouselImages.length]);
+
   // Single-row feedback auto-scroll & interactive controls
   const feedbackScrollRef = useRef<HTMLDivElement>(null);
   const [isFeedbackPaused, setIsFeedbackPaused] = useState(false);
@@ -448,7 +474,7 @@ export const HomePage: React.FC = () => {
                 padding: '1.5rem',
               }}
             >
-              {/* Circular Spices Image Container */}
+              {/* Circular Product Carousel Container (strictly clipped inside circle) */}
               <div
                 className="hero-floating-circle"
                 style={{
@@ -463,16 +489,77 @@ export const HomePage: React.FC = () => {
                   backgroundColor: '#1a3d2b',
                 }}
               >
-                <img
-                  src="/traditional_spices.jpg"
-                  alt="Natural &amp; Traditional Foods"
+                {/* Carousel Slides Track */}
+                <div
                   style={{
-                    width: '100%',
+                    display: 'flex',
+                    width: `${heroCarouselImages.length * 100}%`,
                     height: '100%',
-                    objectFit: 'cover',
-                    display: 'block',
+                    transform: `translateX(-${(heroSlideIndex * 100) / heroCarouselImages.length}%)`,
+                    transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
                   }}
-                />
+                >
+                  {heroCarouselImages.map((imgObj, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        width: `${100 / heroCarouselImages.length}%`,
+                        height: '100%',
+                        position: 'relative',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <img
+                        src={imgObj.url}
+                        alt={imgObj.title}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          display: 'block',
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Micro-dots indicator inside circle bottom */}
+                {heroCarouselImages.length > 1 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: '20px',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      display: 'flex',
+                      gap: '5px',
+                      zIndex: 10,
+                      backgroundColor: 'rgba(10, 32, 18, 0.6)',
+                      padding: '4px 8px',
+                      borderRadius: '9999px',
+                      backdropFilter: 'blur(4px)',
+                    }}
+                  >
+                    {heroCarouselImages.map((_, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setHeroSlideIndex(idx)}
+                        aria-label={`Slide ${idx + 1}`}
+                        style={{
+                          width: idx === heroSlideIndex ? '16px' : '5px',
+                          height: '5px',
+                          borderRadius: '9999px',
+                          backgroundColor: idx === heroSlideIndex ? '#f59e0b' : 'rgba(255, 255, 255, 0.5)',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease',
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Floating "BEST SELLER" Circular Badge */}

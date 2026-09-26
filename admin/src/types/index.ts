@@ -159,8 +159,13 @@ export interface OrderItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  taxableValue?: number;
   gstRate?: number;
   gstAmount?: number;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   snapshot: any;
 }
 
@@ -171,9 +176,16 @@ export interface Order {
   user?: { name: string; email?: string; phone?: string; userCode: string };
   subtotal: number;
   shippingFee: number;
+  taxableAmount?: number;
   taxAmount: number;
   discountAmount: number;
   totalAmount: number;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  sellerStateCode?: string;
+  customerStateCode?: string;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   orderStatus: string;
   paymentStatus: string;
   shippingAddress: any;

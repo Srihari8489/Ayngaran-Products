@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MapPin, Plus, Trash2, Star, Edit2, Phone, CheckCircle2, X, Save } from 'lucide-react';
 import api from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { INDIAN_STATES } from '../../utils/gst.util';
 
 interface Address {
   id: number;
@@ -22,7 +23,7 @@ const EMPTY_FORM = {
   addressLine1: '',
   addressLine2: '',
   city: '',
-  state: '',
+  state: 'Tamil Nadu',
   pincode: '',
   country: 'India',
   isDefault: false,
@@ -221,16 +222,27 @@ export const AddressesPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label style={labelStyle}>State *</label>
-                <input
-                  type="text" required
+                <label style={labelStyle}>State / Union Territory *</label>
+                <select
+                  required
                   value={form.state}
                   onChange={(e) => setForm({ ...form, state: e.target.value })}
-                  placeholder="State"
-                  style={inputStyle}
+                  style={{
+                    ...inputStyle,
+                    cursor: 'pointer',
+                    backgroundColor: '#fff',
+                    fontWeight: 600,
+                  }}
                   onFocus={(e) => (e.target.style.borderColor = '#2d6a4f')}
                   onBlur={(e) => (e.target.style.borderColor = '#cbd5e1')}
-                />
+                >
+                  <option value="" disabled>-- Select State --</option>
+                  {INDIAN_STATES.map((st) => (
+                    <option key={st.code} value={st.name}>
+                      {st.name} ({st.code})
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label style={labelStyle}>Pincode *</label>

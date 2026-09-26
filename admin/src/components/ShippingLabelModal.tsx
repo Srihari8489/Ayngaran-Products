@@ -85,10 +85,12 @@ export const ShippingLabelModal: React.FC<ShippingLabelModalProps> = ({ order, o
     : new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
   // Compute package weight estimate
-  const totalWeightGrams = items.reduce((acc: number, it: any) => {
-    const w = it.variant?.weight || it.weight || 250;
-    return acc + w * (it.quantity || 1);
-  }, 0);
+  const totalWeightGrams = Number(order.totalWeightGrams ?? items.reduce((acc: number, it: any) => {
+    const rawW = it.variant?.weight ?? it.weight ?? 0.25;
+    const num = Number(rawW);
+    const wGrams = num < 10 ? Math.round(num * 1000) : Math.round(num);
+    return acc + wGrams * (it.quantity || 1);
+  }, 0));
   const weightKg = (totalWeightGrams / 1000).toFixed(2);
 
   const handlePrint = () => {

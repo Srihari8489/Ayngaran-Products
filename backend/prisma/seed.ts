@@ -386,7 +386,7 @@ async function main() {
       create: p,
     });
   }
-
+  
   // 2. Seed Roles
   console.log('  -> Seeding Roles...');
   const superAdminRole = await prisma.role.upsert({
@@ -677,33 +677,51 @@ async function main() {
     },
   });
 
-  // 10. Seed Delivery Partners
-  console.log('  -> Seeding Delivery Partners...');
+  // 10. Archive / Deactivate Test Delivery Partners
+  console.log('  -> Setting Test Delivery Partners to Inactive...');
   await prisma.deliveryPartner.upsert({
     where: { partnerCode: 'DEL-BLUEDART' },
-    update: {},
+    update: { isActive: false },
     create: {
       partnerCode: 'DEL-BLUEDART',
       name: 'Blue Dart Express',
       contactPhone: '+91 1860 233 1234',
       contactEmail: 'track@bluedart.com',
       trackingUrlTemplate: 'https://www.bluedart.com/tracking?track={tracking}',
-      isActive: true,
+      isActive: false,
     },
   });
 
   await prisma.deliveryPartner.upsert({
     where: { partnerCode: 'DEL-DELHIVERY' },
-    update: {},
+    update: { isActive: false },
     create: {
       partnerCode: 'DEL-DELHIVERY',
       name: 'Delhivery Surface & Air',
       contactPhone: '+91 124 6719500',
       contactEmail: 'support@delhivery.com',
       trackingUrlTemplate: 'https://www.delhivery.com/track/package/{tracking}',
-      isActive: true,
+      isActive: false,
     },
   });
+
+  // 11. Seed Configurable Manual Shipping Settings
+  console.log('  -> Seeding Default Shipping Configuration...');
+  const existingConfig = await prisma.shippingConfig.findFirst();
+  if (!existingConfig) {
+    await prisma.shippingConfig.create({
+      data: {
+        tamilNaduRatePerKg: 60.00,
+        tamilNaduDeliveryTime: 'Within 2 days',
+        outsideTnRatePerKg: 120.00,
+        outsideTnMinDays: 3,
+        outsideTnMaxDays: 5,
+        outsideTnDeliveryTime: '3-5 days',
+        baseWeightGrams: 1000,
+        isActive: true,
+      },
+    });
+  }
 
   console.log('✨ Ayngaran Foods Official Database Seeded Successfully!');
   console.log('   Admin credentials: admin@ayngaran.com / Admin@123AYNGARAN');

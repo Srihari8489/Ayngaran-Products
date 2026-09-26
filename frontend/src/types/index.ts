@@ -124,6 +124,7 @@ export interface CartItem {
   variantId?: number | null;
   sku?: string;
   variantDescription?: string;
+  variantWeight?: number | null;
   quantity: number;
   unitPrice: number;
   totalPrice: number;
@@ -134,13 +135,32 @@ export interface CartItem {
   stockWarning?: string | null;
 }
 
+export interface CartShipping {
+  shippingZone: 'TAMIL_NADU' | 'OUTSIDE_TAMIL_NADU';
+  destinationState: string;
+  totalWeightGrams: number;
+  billableWeightGrams: number;
+  billableUnits: number;
+  ratePerUnit: number;
+  shippingAmount: number;
+  estimatedDelivery: string;
+}
+
 export interface Cart {
   cartId: number;
   items: CartItem[];
   totalItems: number;
   subtotal: number;
+  taxableAmount?: number;
   taxAmount?: number;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  sellerStateCode?: string;
+  customerStateCode?: string;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   allItemsAvailable: boolean;
+  shipping?: CartShipping;
 }
 
 export interface User {
@@ -156,13 +176,24 @@ export interface UserAddress {
   id?: number;
   recipientName?: string;
   fullName?: string;
+  name?: string;
   phone: string;
+  mobile?: string;
   addressLine1: string;
   addressLine2?: string;
+  address?: string;
+  street?: string;
   city: string;
   state: string;
+  stateCode?: string;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  taxableAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   pincode?: string;
   postalCode?: string;
+  pinCode?: string;
   country?: string;
   addressType?: 'HOME' | 'WORK' | 'OTHER';
   isDefault?: boolean;
@@ -170,18 +201,32 @@ export interface UserAddress {
 
 export interface OrderItem {
   id: number;
+  productId?: number;
+  variantId?: number | null;
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  taxableValue?: number;
   gstRate?: number;
   gstAmount?: number;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   snapshot: {
     name: string;
-    brand: string;
+    brand?: string;
     sku?: string;
     image?: string;
+    variantLabel?: string;
+    taxableValue?: number;
     gstRate?: number;
     gstAmount?: number;
+    supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+    cgstAmount?: number;
+    sgstAmount?: number;
+    igstAmount?: number;
+    hsnCode?: string;
   };
 }
 
@@ -191,17 +236,34 @@ export interface Order {
   totalAmount: number;
   subtotal?: number;
   shippingFee?: number;
+  taxableAmount?: number;
   taxAmount?: number;
+  discountAmount?: number;
+  supplyType?: 'INTRA_STATE' | 'INTER_STATE';
+  sellerStateCode?: string;
+  customerStateCode?: string;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
   orderStatus: string;
   paymentStatus: string;
   itemCount: number;
   items: OrderItem[];
   shippingAddress?: UserAddress;
+  billingAddress?: UserAddress;
   delivery?: {
     status: string;
     trackingNumber?: string;
     deliveryPartner?: { name: string; trackingUrlTemplate?: string };
   };
+  shippingZone?: string;
+  totalWeightGrams?: number;
+  billableWeightGrams?: number;
+  billableUnits?: number;
+  shippingRate?: number;
+  estimatedDelivery?: string;
+  courierName?: string | null;
+  trackingNumber?: string | null;
   createdAt: string;
 }
 

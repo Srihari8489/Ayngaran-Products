@@ -321,7 +321,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLogin }) => {
           lineHeight: 1.35,
         }}
       >
-        <span>100% Natural Traditional Products - Free Shipping Above Rs 499!</span>
+        <span>100% Authentic Natural Traditional Products - Delivered Fresh Pan-India!</span>
         <Link
           to="/catalog"
           style={{
@@ -367,14 +367,15 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLogin }) => {
         }}
       >
         <div
-          className="container header-grid-container"
+          className="header-grid-container"
           style={{
+            width: '100%',
+            maxWidth: '100%',
+            padding: '0.2rem 1.25rem',
             display: 'grid',
             gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)',
             alignItems: 'center',
             gap: '1.25rem',
-            paddingTop: '0.2rem',
-            paddingBottom: '0.2rem',
             overflow: 'visible',
           }}
         >
@@ -687,7 +688,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLogin }) => {
                 <button
                   ref={collectionsBtnRef}
                   type="button"
-                  onClick={toggleCollectionsMenu}
+                  onClick={() => {
+                    closeCollectionsMenu(true);
+                    navigate('/catalog');
+                  }}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -746,7 +750,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLogin }) => {
                       animation: 'collectionsFadeIn 0.15s ease-out',
                     }}
                   >
-                    {/* Header matching Image 2 */}
+                    {/* Header */}
                     <div
                       style={{
                         padding: '1rem 1.25rem 0.65rem',
@@ -767,35 +771,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenLogin }) => {
                       >
                         Our Collections
                       </h3>
-                      <Link
-                        to="/catalog"
-                        onClick={() => closeCollectionsMenu(true)}
-                        style={{
-                          fontSize: '0.78rem',
-                          fontWeight: 700,
-                          color: '#16a34a',
-                          textDecoration: 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          backgroundColor: '#f0fdf4',
-                          padding: '0.25rem 0.65rem',
-                          borderRadius: '9999px',
-                          border: '1px solid #dcfce7',
-                          transition: 'all 0.15s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = '#113926';
-                          e.currentTarget.style.color = '#ffffff';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.backgroundColor = '#f0fdf4';
-                          e.currentTarget.style.color = '#16a34a';
-                        }}
-                      >
-                        <span>Full Store</span>
-                        <span style={{ fontSize: '0.9rem', lineHeight: 1 }}>&rarr;</span>
-                      </Link>
                     </div>
 
                     {/* Divider Line */}

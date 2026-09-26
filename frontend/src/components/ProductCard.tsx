@@ -1,8 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Star, ShoppingBag, ArrowRight, Heart } from 'lucide-react';
+import { Star, Heart } from 'lucide-react';
 import { Product } from '../types';
-import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 
 interface ProductCardProps {
@@ -10,18 +9,8 @@ interface ProductCardProps {
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
-  const { addToCart } = useCart();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const isLiked = isInWishlist(product.id);
-
-  const handleQuickAdd = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const primaryVariant = product.variants?.[0];
-    addToCart(product.id, primaryVariant?.id, 1).catch((err) => {
-      alert(err.message);
-    });
-  };
 
   const handleWishlistClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -72,16 +61,6 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           }}
           className="product-img"
         />
-
-        {/* Low Stock Warning Pill */}
-        {product.isLowStock && (
-          <span
-            className="badge badge-warning"
-            style={{ position: 'absolute', top: '0.75rem', left: '0.75rem' }}
-          >
-            Only {product.totalStock} Left
-          </span>
-        )}
 
         {/* Wishlist Heart Button */}
         <button
@@ -153,7 +132,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           </div>
 
           {/* Title */}
-          <Link to={`/product/${product.slug}`}>
+          <Link to={`/product/${product.slug}`} style={{ textDecoration: 'none' }}>
             <h3
               style={{
                 fontSize: '0.98rem',
@@ -172,36 +151,28 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           </Link>
         </div>
 
-        {/* Price & Action */}
-        <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>Starting from</span>
-            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-main)' }}>
-              ₹{Number(product.basePrice).toLocaleString()}
-            </span>
-          </div>
+        {/* Price Row */}
+        {(() => {
+          const startingPrice = product.variants && product.variants.length > 0
+            ? Math.min(...product.variants.map((v: any) => Number(v.price)).filter((p: number) => !isNaN(p) && p > 0))
+            : Number(product.basePrice);
+          const hasMultipleVariants = product.variants && product.variants.length > 1;
 
-          {product.variants && product.variants.length > 1 ? (
-            <Link
-              to={`/product/${product.slug}`}
-              className="btn-secondary"
-              style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
-            >
-              <span>{product.variants.length} Options</span>
-              <ArrowRight size={14} />
+          return (
+            <Link to={`/product/${product.slug}`} style={{ textDecoration: 'none' }}>
+              <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>
+                    {hasMultipleVariants ? 'Starting from' : 'Price'}
+                  </span>
+                  <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                    ₹{startingPrice.toLocaleString()}
+                  </span>
+                </div>
+              </div>
             </Link>
-          ) : (
-            <button
-              onClick={handleQuickAdd}
-              className="btn-primary"
-              style={{ padding: '0.5rem 0.85rem', fontSize: '0.82rem' }}
-              title="Add to cart"
-            >
-              <ShoppingBag size={15} />
-              <span>Add</span>
-            </button>
-          )}
-        </div>
+          );
+        })()}
       </div>
 
       <style>{`

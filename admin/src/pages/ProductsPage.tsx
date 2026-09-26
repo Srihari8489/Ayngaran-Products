@@ -243,7 +243,7 @@ export const ProductsPage: React.FC = () => {
       description: '',
       categoryId: categories.length > 0 ? String(categories[0].id) : '',
       brandId: brands.length > 0 ? String(brands[0].id) : '',
-      basePrice: '999',
+      basePrice: '',
       minStockAlert: '5',
       useCategoryGst: true,
       gstRate: '5',
@@ -252,7 +252,7 @@ export const ProductsPage: React.FC = () => {
     setVariantsList([
       {
         sku: `${code}-VAR-1`,
-        price: '999',
+        price: '',
         stockQuantity: '25',
         barcode: '',
         weight: '0.4',
@@ -275,7 +275,7 @@ export const ProductsPage: React.FC = () => {
       ...prev,
       {
         sku: `${baseForm.productCode}-VAR-${nextIdx}`,
-        price: baseForm.basePrice || '999',
+        price: baseForm.basePrice || '100',
         stockQuantity: '10',
         barcode: '',
         weight: '0.5',
@@ -1128,7 +1128,13 @@ export const ProductsPage: React.FC = () => {
                         required
                         className="form-input"
                         value={baseForm.basePrice}
-                        onChange={(e) => setBaseForm({ ...baseForm, basePrice: e.target.value })}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBaseForm((prev) => ({ ...prev, basePrice: val }));
+                          setVariantsList((prev) =>
+                            prev.map((v, idx) => (idx === 0 && (!v.price || v.price === baseForm.basePrice) ? { ...v, price: val } : v))
+                          );
+                        }}
                       />
                     </div>
 
@@ -1525,6 +1531,9 @@ export const ProductsPage: React.FC = () => {
                         setFormError('Please fill all required basic fields before proceeding.');
                         return;
                       }
+                      setVariantsList((prev) =>
+                        prev.map((v, idx) => (idx === 0 && !v.price ? { ...v, price: baseForm.basePrice } : v))
+                      );
                     }
                     setFormError('');
                     setWizardStep((prev) => prev + 1);

@@ -12,11 +12,14 @@ import {
   Plus,
   Edit,
   Check,
+  Tag,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { UserAddress } from '../types';
+import { resolveGstStateCode, SELLER_STATE_CODE, INDIAN_STATES } from '../utils/gst.util';
+import { getVariantDisplay } from '../components/CartDrawer';
 
 export const CheckoutPage: React.FC = () => {
   const { user, isAuthenticated, refreshProfile } = useAuth();
@@ -26,6 +29,21 @@ export const CheckoutPage: React.FC = () => {
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
   const [isAddingNewAddress, setIsAddingNewAddress] = useState(false);
+
+  // Dynamic Shipping Calculation State
+  const [shippingData, setShippingData] = useState<{
+    shippingZone: string;
+    destinationState: string;
+    destinationStateCode: string;
+    totalWeightGrams: number;
+    billableWeightGrams: number;
+    billableUnits: number;
+    ratePerUnit: number;
+    shippingAmount: number;
+    estimatedDelivery: string;
+    baseWeightGrams: number;
+  } | null>(null);
+  const [isCalculatingShipping, setIsCalculatingShipping] = useState(false);
 
   // Profile Completion Modal state
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -185,6 +203,45 @@ export const CheckoutPage: React.FC = () => {
     }
   }, [isAuthenticated]);
 
+  // Determine delivery destination state code for GST bifurcation & shipping zone (must be before early returns)
+  const selectedAddress = addresses.find((a) => a.id === selectedAddressId) || (isAddingNewAddress ? newAddress : null);
+  const destinationState = selectedAddress?.state?.trim() || 'Tamil Nadu';
+  const customerStateCode = resolveGstStateCode(destinationState);
+  const supplyType = customerStateCode === SELLER_STATE_CODE ? 'INTRA_STATE' : 'INTER_STATE';
+  const isIntraState = supplyType === 'INTRA_STATE';
+
+  // Fetch Authoritative Backend Shipping Calculation (Hook must be called unconditionally before any early returns)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchShipping = async () => {
+      if (!isAuthenticated || !cart || !cart.items || cart.items.length === 0) return;
+      setIsCalculatingShipping(true);
+      try {
+        const res: any = await api.post('/checkout/shipping/calculate', {
+          destinationState,
+          items: cart.items.map((it) => ({
+            variantId: it.variantId,
+            productId: it.productId,
+            quantity: it.quantity,
+          })),
+        });
+        const data = res?.data || res;
+        if (isMounted && data && data.shippingAmount !== undefined) {
+          setShippingData(data);
+        }
+      } catch (err) {
+        console.error('Failed to calculate shipping:', err);
+      } finally {
+        if (isMounted) setIsCalculatingShipping(false);
+      }
+    };
+
+    fetchShipping();
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated, destinationState, cart?.items]);
+
   if (!isAuthenticated) {
     return (
       <div className="container" style={{ padding: '6rem 1.5rem', textAlign: 'center' }}>
@@ -206,11 +263,32 @@ export const CheckoutPage: React.FC = () => {
   }
 
   const subtotal = cart.subtotal;
-  const shippingFee = subtotal >= 1000 ? 0 : 99;
-  const taxAmount = cart.taxAmount !== undefined
-    ? cart.taxAmount
-    : Math.round(cart.items.reduce((sum, item) => sum + (item.gstAmount ?? item.totalPrice * ((item.gstRate ?? 5) / 100)), 0) * 100) / 100;
-  const totalAmount = subtotal + shippingFee + taxAmount;
+
+  // Shipping charge from authoritative backend response (or fallback based on zone and item quantities)
+  const fallbackUnits = (cart.items || []).reduce((acc, it) => acc + Math.max(1, it.quantity || 1), 0);
+  const shippingFee = shippingData
+    ? Number(shippingData.shippingAmount)
+    : (isIntraState ? 60 : 120) * Math.max(1, fallbackUnits);
+
+  // Reverse GST calculation: Selling prices in store are inclusive of GST
+  // Taxable Value = itemTotal / (1 + rate / 100)
+  const taxableSubtotal = Math.round(
+    cart.items.reduce((sum, item) => {
+      const rate = item.gstRate ?? 5;
+      return sum + (item.totalPrice / (1 + rate / 100));
+    }, 0) * 100
+  ) / 100;
+
+  const taxAmount = Math.round((subtotal - taxableSubtotal) * 100) / 100;
+
+  const cgstAmount = isIntraState ? Math.round((taxAmount / 2) * 100) / 100 : 0;
+  const sgstAmount = isIntraState ? Math.round((taxAmount - cgstAmount) * 100) / 100 : 0;
+  const igstAmount = !isIntraState ? taxAmount : 0;
+
+  // Total payable: items subtotal already includes GST
+  const rawTotal = subtotal + shippingFee;
+  const roundTotal = Math.round(rawTotal);
+  const roundOff = Math.round((roundTotal - rawTotal) * 100) / 100;
 
   const handleSaveProfileAndContinue = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -309,13 +387,7 @@ export const CheckoutPage: React.FC = () => {
   };
 
   return (
-    <div className="container" style={{ padding: '2.5rem 1.5rem 6rem' }}>
-      <div style={{ marginBottom: '2.5rem' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Secure Checkout</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          Server-side price & stock verification guaranteed
-        </p>
-      </div>
+    <div className="container" style={{ padding: '2.5rem' }}>
 
       {errorMessage && (
         <div className="badge-danger" style={{ padding: '0.85rem 1.25rem', borderRadius: '0.65rem', marginBottom: '1.5rem', width: '100%', fontSize: '0.9rem' }}>
@@ -657,49 +729,220 @@ export const CheckoutPage: React.FC = () => {
 
             {/* Items Mini List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '220px', overflowY: 'auto', marginBottom: '1.5rem' }}>
-              {cart.items.map((item) => (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
-                  <div style={{ flex: 1, paddingRight: '1rem' }}>
-                    <span style={{ fontWeight: 600 }}>{item.productName}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>
-                      Qty: {item.quantity} {item.variantDescription ? `• ${item.variantDescription}` : ''} {item.gstRate !== undefined ? `• GST ${item.gstRate}%` : ''}
-                    </span>
+              {cart.items.map((item) => {
+                const variantLabel = getVariantDisplay(item);
+                return (
+                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+                    <div style={{ flex: 1, paddingRight: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600 }}>{item.productName}</span>
+                        {variantLabel && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              padding: '1px 7px',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              border: '1px solid #bbf7d0',
+                              borderRadius: '4px',
+                              fontSize: '0.70rem',
+                              fontWeight: 600,
+                            }}
+                          >
+                            <Tag size={10} />
+                            {variantLabel}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                        Qty: {item.quantity} {variantLabel ? `• Variant: ${variantLabel}` : ''} {item.gstRate !== undefined ? `• GST ${item.gstRate}%` : ''}
+                      </span>
+                    </div>
+                    <span style={{ fontWeight: 700 }}>₹{item.totalPrice.toLocaleString()}</span>
                   </div>
-                  <span style={{ fontWeight: 700 }}>₹{item.totalPrice.toLocaleString()}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Calculations Breakdown */}
-            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.9rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Items Subtotal</span>
-                <span style={{ fontWeight: 600 }}>₹{subtotal.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Express Delivery</span>
-                <span style={{ fontWeight: 600, color: shippingFee === 0 ? 'var(--success)' : 'inherit' }}>
-                  {shippingFee === 0 ? 'FREE' : `₹${shippingFee}`}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Applicable GST</span>
-                <span style={{ fontWeight: 600 }}>₹{taxAmount.toLocaleString()}</span>
+            <div style={{ borderTop: '1.5px solid #e2e8f0', paddingTop: '0.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', fontSize: '0.88rem' }}>
+                <span style={{ color: '#475569' }}>Products Subtotal</span>
+                <span style={{ fontWeight: 700, color: '#0f172a' }}>₹{subtotal.toFixed(2)}</span>
               </div>
 
+              {/* Tax Details Table (Clear Breakdown for Normal Customers) */}
               <div
                 style={{
-                  borderTop: '2px dashed var(--border-color)',
-                  marginTop: '0.75rem',
-                  paddingTop: '0.75rem',
+                  backgroundColor: '#f8fafc',
+                  borderRadius: '0.625rem',
+                  border: '1px solid #e2e8f0',
+                  padding: '0.75rem 0.85rem',
+                  margin: '0.65rem 0',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '0.45rem',
+                    borderBottom: '1px dashed #cbd5e1',
+                    paddingBottom: '0.35rem',
+                  }}
+                >
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#1a3d2b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                    Tax Breakdown (Included in Price)
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      backgroundColor: isIntraState ? '#dcfce7' : '#e0e7ff',
+                      color: isIntraState ? '#166534' : '#4338ca',
+                      padding: '2px 7px',
+                      borderRadius: '4px',
+                      fontWeight: 800,
+                      border: isIntraState ? '1px solid #bbf7d0' : '1px solid #c7d2fe',
+                    }}
+                  >
+                    {isIntraState ? 'Intra-State (TN → TN)' : `Inter-State (TN → ${destinationState})`}
+                  </span>
+                </div>
+
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '3px 0', color: '#64748b' }}>Price Before Tax:</td>
+                      <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, color: '#334155' }}>
+                        ₹{taxableSubtotal.toFixed(2)}
+                      </td>
+                    </tr>
+                    {isIntraState ? (
+                      <>
+                        <tr>
+                          <td style={{ padding: '3px 0', color: '#64748b' }}>Central Govt Tax (CGST):</td>
+                          <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
+                            ₹{cgstAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '3px 0', color: '#64748b' }}>State Govt Tax (SGST):</td>
+                          <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
+                            ₹{sgstAmount.toFixed(2)}
+                          </td>
+                        </tr>
+                      </>
+                    ) : (
+                      <tr>
+                        <td style={{ padding: '3px 0', color: '#64748b' }}>Integrated Interstate Tax (IGST):</td>
+                        <td style={{ padding: '3px 0', textAlign: 'right', fontWeight: 600, color: '#0369a1' }}>
+                          ₹{igstAmount.toFixed(2)}
+                        </td>
+                      </tr>
+                    )}
+                    <tr style={{ borderTop: '1px dashed #cbd5e1' }}>
+                      <td style={{ padding: '5px 0 0', fontWeight: 700, color: '#166534', fontSize: '0.8rem' }}>
+                        Total Tax (Already Included):
+                      </td>
+                      <td style={{ padding: '5px 0 0', textAlign: 'right', fontWeight: 800, color: '#166534', fontSize: '0.82rem' }}>
+                        ₹{taxAmount.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: '5px', lineHeight: 1.35 }}>
+                  * No extra tax added at checkout. All product prices are already inclusive of GST.
+                </div>
+              </div>
+
+              {/* Delivery Charges (Positioned before Round Off) */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  padding: '0.65rem 0',
+                  borderTop: '1px solid #f1f5f9',
+                  borderBottom: '1px solid #f1f5f9',
+                  fontSize: '0.88rem',
+                  marginBottom: '0.4rem',
+                }}
+              >
+                <div style={{ color: '#475569', flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Truck size={15} color="#059669" />
+                    <span style={{ fontWeight: 700, color: '#0f172a' }}>Delivery Charges</span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: 'fit-content',
+                        padding: '1px 7px',
+                        borderRadius: '4px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        background: (shippingData?.shippingZone === 'TAMIL_NADU' || isIntraState) ? '#dcfce7' : '#e0f2fe',
+                        color: (shippingData?.shippingZone === 'TAMIL_NADU' || isIntraState) ? '#15803d' : '#0369a1',
+                        border: (shippingData?.shippingZone === 'TAMIL_NADU' || isIntraState) ? '1px solid #bbf7d0' : '1px solid #bae6fd',
+                      }}>
+                        {(shippingData?.shippingZone === 'TAMIL_NADU' || isIntraState) ? 'Tamil Nadu (Intrastate Zone)' : 'Outside Tamil Nadu (Interstate Zone)'}
+                      </span>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569' }}>
+                        ₹{shippingData?.ratePerUnit || (isIntraState ? 60 : 120)} / 1 KG
+                      </span>
+                    </div>
+                    {shippingData && (
+                      <span style={{ fontWeight: 600, color: '#334155' }}>
+                        Weight: {((shippingData.totalWeightGrams ?? 0) / 1000).toFixed(2)} KG ({shippingData.totalWeightGrams ?? 0}g) → {shippingData.billableUnits || 1} slab{(shippingData.billableUnits || 1) > 1 ? 's' : ''} ({shippingData.billableUnits || 1} × ₹{shippingData.ratePerUnit || (isIntraState ? 60 : 120)})
+                      </span>
+                    )}
+                    <span style={{ color: '#059669', fontWeight: 700 }}>
+                      Est. Delivery: {shippingData?.estimatedDelivery || (isIntraState ? 'Within 2 days' : '3-5 days')}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ padding: '0 0 0 0.5rem', textAlign: 'right', fontWeight: 900, color: '#1a3d2b', fontSize: '1.05rem', verticalAlign: 'top', flexShrink: 0 }}>
+                  {isCalculatingShipping ? 'Calculating...' : `₹${shippingFee.toFixed(2)}`}
+                </div>
+              </div>
+
+              {/* Round Off Line Item */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.35rem 0',
+                  fontSize: '0.85rem',
+                  color: '#475569',
+                }}
+              >
+                <span>Round Off</span>
+                <span style={{ fontWeight: 600 }}>
+                  {roundOff >= 0 ? `+₹${roundOff.toFixed(2)}` : `-₹${Math.abs(roundOff).toFixed(2)}`}
+                </span>
+              </div>
+
+              {/* Total Payable Box */}
+              <div
+                style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'baseline',
+                  paddingTop: '0.75rem',
+                  borderTop: '2px solid #cbd5e1',
+                  marginTop: '0.35rem',
                 }}
               >
-                <span style={{ fontSize: '1.15rem', fontWeight: 800 }}>Total Payable</span>
-                <span style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--primary-700)' }}>
-                  ₹{totalAmount.toLocaleString()}
+                <div>
+                  <span style={{ fontSize: '1.05rem', fontWeight: 900, color: '#0f172a', display: 'block' }}>Total Amount to Pay</span>
+                  <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Includes all items, taxes & delivery</span>
+                </div>
+                <span style={{ fontSize: '1.65rem', fontWeight: 900, color: '#1a3d2b' }}>
+                  ₹{roundTotal.toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
@@ -714,10 +957,6 @@ export const CheckoutPage: React.FC = () => {
               <ArrowRight size={18} />
             </button>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', marginTop: '1rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-              <ShieldCheck size={14} color="var(--success)" />
-              <span>Authoritative SSL & encrypted backend verification</span>
-            </div>
           </div>
         </div>
       </form>
@@ -1040,16 +1279,27 @@ export const CheckoutPage: React.FC = () => {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
-                  State *
+                  State / Union Territory *
                 </label>
-                <input
-                  type="text"
+                <select
                   required
-                  placeholder="e.g. Tamil Nadu"
                   value={addressForm.state}
                   onChange={(e) => setAddressForm({ ...addressForm, state: e.target.value })}
                   className="input-field"
-                />
+                  style={{
+                    cursor: 'pointer',
+                    backgroundColor: '#fff',
+                    fontWeight: 600,
+                    color: '#0f172a',
+                  }}
+                >
+                  <option value="" disabled>-- Select Delivery State --</option>
+                  {INDIAN_STATES.map((st) => (
+                    <option key={st.code} value={st.name}>
+                      {st.name} ({st.code})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

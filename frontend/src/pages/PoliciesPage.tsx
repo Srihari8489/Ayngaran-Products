@@ -259,11 +259,10 @@ export const PoliciesPage: React.FC = () => {
                   <PackageCheck className="w-6 h-6 text-amber-700 flex-shrink-0 mt-1" />
                   <div>
                     <h4 style={{ fontWeight: 800, color: '#854d0e', marginBottom: '0.25rem' }}>
-                      Free Shipping on Orders Above ₹499
+                      Weight-Based Fair Shipping
                     </h4>
                     <p style={{ fontSize: '0.9rem', color: '#713f12', margin: 0 }}>
-                      We offer complimentary delivery pan-India on all orders exceeding ₹499. For smaller orders below
-                      ₹499, a nominal flat shipping fee of ₹50 is applied at checkout.
+                      Shipping charges are calculated automatically based on total order weight and destination zone (Tamil Nadu vs. Outside Tamil Nadu), ensuring transparent and fair delivery rates for all orders.
                     </p>
                   </div>
                 </div>
@@ -291,19 +290,14 @@ export const PoliciesPage: React.FC = () => {
                     </thead>
                     <tbody>
                       <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Tamil Nadu & Puducherry</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>1 - 2 Business Days</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>Blue Dart / ST Courier / Professional</td>
-                      </tr>
-                      <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>South India (KA, KL, AP, TS)</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>2 - 3 Business Days</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>Delhivery / Blue Dart Express</td>
+                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Tamil Nadu</td>
+                        <td style={{ padding: '0.75rem 1rem' }}>Within 2 Business Days</td>
+                        <td style={{ padding: '0.75rem 1rem' }}>Assigned Express Courier Network</td>
                       </tr>
                       <tr>
-                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Rest of India</td>
+                        <td style={{ padding: '0.75rem 1rem', fontWeight: 600 }}>Outside Tamil Nadu (All Other States)</td>
                         <td style={{ padding: '0.75rem 1rem' }}>3 - 5 Business Days</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>Delhivery Air / DTDC / Speed Post</td>
+                        <td style={{ padding: '0.75rem 1rem' }}>Assigned National Courier / Speed Post Network</td>
                       </tr>
                     </tbody>
                   </table>
@@ -685,8 +679,8 @@ export const PoliciesPage: React.FC = () => {
                       a: 'Every package is prepared in small batches and heat-sealed in premium moisture-barrier food-grade pouches immediately after cooling. We use shock-absorbent corrugated packaging so fragile savories reach your doorstep intact and crunch-ready.',
                     },
                     {
-                      q: 'What is your minimum order amount for free delivery?',
-                      a: 'We provide Free Express Delivery across India for all cart orders valued at ₹499 and above. For orders under ₹499, a nominal flat courier fee of ₹50 is applied at checkout.',
+                      q: 'How are delivery charges calculated for my order?',
+                      a: 'Delivery charges are calculated based on the total weight of the products and your delivery destination state (Tamil Nadu or Outside Tamil Nadu). The exact weight slab, rate, and estimated delivery timeline are calculated and displayed at checkout.',
                     },
                     {
                       q: 'Do you accept corporate gifting, wedding, or bulk festival orders?',

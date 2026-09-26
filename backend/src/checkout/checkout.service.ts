@@ -5,10 +5,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { computeGstBreakdown } from '../common/utils/gst.util';
+import { ShippingService } from '../shipping/shipping.service';
 
 @Injectable()
 export class CheckoutService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private shippingService: ShippingService,
+  ) {}
 
   async processCheckout(userId: number, dto: CheckoutDto) {
     const user = await this.prisma.client.user.findUnique({
@@ -128,13 +133,34 @@ export class CheckoutService {
         unitPrice = Number(variant.price);
         variantSku = variant.sku;
 
-        const attrLabels = variant.variantValues?.map((vv: any) => vv.attributeValue?.displayName).filter(Boolean);
+        const attrLabels = variant.variantValues
+          ?.map((vv: any) => vv.attributeValue?.displayName || vv.attributeValue?.value)
+          .filter(Boolean);
         if (attrLabels && attrLabels.length > 0) {
           variantLabel = attrLabels.join(' / ');
         } else if (variant.weight) {
-          variantLabel = `${variant.weight}g`;
+          const num = Number(variant.weight);
+          if (num > 0) {
+            if (num < 10) {
+              variantLabel = num < 1 ? `${Math.round(num * 1000)}g` : `${Number(num.toFixed(2))} KG`;
+            } else if (num >= 1000) {
+              variantLabel = `${Number((num / 1000).toFixed(2))} KG`;
+            } else {
+              variantLabel = `${Math.round(num)}g`;
+            }
+          } else {
+            variantLabel = variant.sku;
+          }
+        } else if (variant.sku) {
+          const match = variant.sku.match(/(\d+(?:\.\d+)?)\s*(kg|kilo|g|gm|gram)\b/i);
+          if (match) {
+            const unit = match[2].toLowerCase().startsWith('k') ? ' KG' : 'g';
+            variantLabel = `${match[1]}${unit}`;
+          } else {
+            variantLabel = variant.sku;
+          }
         } else {
-          variantLabel = variant.sku;
+          variantLabel = null;
         }
       }
 
@@ -146,7 +172,12 @@ export class CheckoutService {
       const effectiveGstRate = product.useCategoryGst
         ? categoryGst
         : (product.gstRate !== null && product.gstRate !== undefined ? Number(product.gstRate) : categoryGst);
-      const itemGstAmount = Math.round(itemTotal * (effectiveGstRate / 100) * 100) / 100;
+
+      // Reverse GST calculation: Selling price is inclusive of GST
+      // Taxable Value = itemTotal / (1 + rate / 100)
+      // GST Amount = itemTotal - Taxable Value
+      const itemTaxableValue = Math.round((itemTotal / (1 + effectiveGstRate / 100)) * 100) / 100;
+      const itemGstAmount = Math.round((itemTotal - itemTaxableValue) * 100) / 100;
 
       validatedItems.push({
         productId: item.productId,
@@ -154,6 +185,7 @@ export class CheckoutService {
         quantity: item.quantity,
         unitPrice,
         totalPrice: itemTotal,
+        taxableValue: itemTaxableValue,
         gstRate: effectiveGstRate,
         gstAmount: itemGstAmount,
         productSnapshot: {
@@ -163,6 +195,7 @@ export class CheckoutService {
           sku: variantSku,
           variantLabel,
           image: product.images[0]?.url || null,
+          taxableValue: itemTaxableValue,
           gstRate: effectiveGstRate,
           gstAmount: itemGstAmount,
           categoryName: product.category?.name || 'General',
@@ -170,10 +203,45 @@ export class CheckoutService {
       });
     }
 
-    // Taxes & Shipping calculations based on itemized GST snapshots
-    const shippingFee = subtotal >= 1000 ? 0 : 99;
+    // Authoritative backend shipping calculation using destination state and order items
+    const shippingCalc = await this.shippingService.calculateShipping({
+      destinationState: shippingAddress.state,
+      items: validatedItems.map((vi) => ({
+        productId: vi.productId,
+        variantId: vi.variantId,
+        quantity: vi.quantity,
+      })),
+    });
+
+    const shippingFee = shippingCalc.shippingAmount;
+    const totalTaxable = Math.round(validatedItems.reduce((acc, it) => acc + it.taxableValue, 0) * 100) / 100;
     const taxAmount = Math.round(validatedItems.reduce((acc, it) => acc + it.gstAmount, 0) * 100) / 100;
-    const totalAmount = Math.round((subtotal + shippingFee + taxAmount) * 100) / 100;
+    const rawTotal = subtotal + shippingFee;
+    const totalAmount = Math.round(rawTotal); // Round to nearest rupee
+
+    // Determine supply type & GST split using customer delivery state code
+    const gstBreakdown = computeGstBreakdown(totalTaxable, taxAmount, shippingAddress.state);
+
+    // Enrich item snapshots with itemized CGST / SGST / IGST
+    validatedItems.forEach((vi) => {
+      const itemGst = computeGstBreakdown(vi.taxableValue, vi.gstAmount, shippingAddress.state);
+      vi.productSnapshot.supplyType = itemGst.supplyType;
+      vi.productSnapshot.cgstAmount = itemGst.cgstAmount;
+      vi.productSnapshot.sgstAmount = itemGst.sgstAmount;
+      vi.productSnapshot.igstAmount = itemGst.igstAmount;
+    });
+
+    // Enrich shippingAddress with immutable tax record
+    shippingAddress = {
+      ...shippingAddress,
+      stateCode: gstBreakdown.customerStateCode,
+      supplyType: gstBreakdown.supplyType,
+      taxableAmount: gstBreakdown.taxableAmount,
+      cgstAmount: gstBreakdown.cgstAmount,
+      sgstAmount: gstBreakdown.sgstAmount,
+      igstAmount: gstBreakdown.igstAmount,
+      gstAmount: gstBreakdown.totalGst,
+    };
 
     // Generate unique order number (e.g. ORD-2026-874123)
     const orderNumber = `ORD-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -229,6 +297,12 @@ export class CheckoutService {
             orderStatus: 'CONFIRMED',
             paymentStatus: 'PENDING_COD',
             shippingAddressJson: JSON.stringify(shippingAddress),
+            shippingZone: shippingCalc.shippingZone,
+            totalWeightGrams: shippingCalc.totalWeightGrams,
+            billableWeightGrams: shippingCalc.billableWeightGrams,
+            billableUnits: shippingCalc.billableUnits,
+            shippingRate: shippingCalc.ratePerUnit,
+            estimatedDelivery: shippingCalc.estimatedDelivery,
             items: {
               create: validatedItems.map((vi) => ({
                 productId: vi.productId,
@@ -266,7 +340,23 @@ export class CheckoutService {
           orderNumber: order.orderNumber,
           orderStatus: order.orderStatus,
           paymentStatus: order.paymentStatus,
+          subtotal: Number(order.subtotal),
+          taxableAmount: gstBreakdown.taxableAmount,
+          taxAmount: Number(order.taxAmount),
+          shippingFee: Number(order.shippingFee),
           totalAmount: Number(order.totalAmount),
+          shippingZone: order.shippingZone,
+          totalWeightGrams: order.totalWeightGrams,
+          billableWeightGrams: order.billableWeightGrams,
+          billableUnits: order.billableUnits,
+          shippingRate: order.shippingRate ? Number(order.shippingRate) : shippingCalc.ratePerUnit,
+          estimatedDelivery: order.estimatedDelivery,
+          supplyType: gstBreakdown.supplyType,
+          sellerStateCode: gstBreakdown.sellerStateCode,
+          customerStateCode: gstBreakdown.customerStateCode,
+          cgstAmount: gstBreakdown.cgstAmount,
+          sgstAmount: gstBreakdown.sgstAmount,
+          igstAmount: gstBreakdown.igstAmount,
           paymentRequired: false,
         };
       });
@@ -285,6 +375,12 @@ export class CheckoutService {
         orderStatus: 'PENDING',
         paymentStatus: 'UNPAID',
         shippingAddressJson: JSON.stringify(shippingAddress),
+        shippingZone: shippingCalc.shippingZone,
+        totalWeightGrams: shippingCalc.totalWeightGrams,
+        billableWeightGrams: shippingCalc.billableWeightGrams,
+        billableUnits: shippingCalc.billableUnits,
+        shippingRate: shippingCalc.ratePerUnit,
+        estimatedDelivery: shippingCalc.estimatedDelivery,
         items: {
           create: validatedItems.map((vi) => ({
             productId: vi.productId,
@@ -306,7 +402,23 @@ export class CheckoutService {
       orderNumber: pendingOrder.orderNumber,
       orderStatus: pendingOrder.orderStatus,
       paymentStatus: pendingOrder.paymentStatus,
+      subtotal: Number(pendingOrder.subtotal),
+      taxableAmount: gstBreakdown.taxableAmount,
+      taxAmount: Number(pendingOrder.taxAmount),
+      shippingFee: Number(pendingOrder.shippingFee),
       totalAmount: Number(pendingOrder.totalAmount),
+      shippingZone: pendingOrder.shippingZone,
+      totalWeightGrams: pendingOrder.totalWeightGrams,
+      billableWeightGrams: pendingOrder.billableWeightGrams,
+      billableUnits: pendingOrder.billableUnits,
+      shippingRate: pendingOrder.shippingRate ? Number(pendingOrder.shippingRate) : shippingCalc.ratePerUnit,
+      estimatedDelivery: pendingOrder.estimatedDelivery,
+      supplyType: gstBreakdown.supplyType,
+      sellerStateCode: gstBreakdown.sellerStateCode,
+      customerStateCode: gstBreakdown.customerStateCode,
+      cgstAmount: gstBreakdown.cgstAmount,
+      sgstAmount: gstBreakdown.sgstAmount,
+      igstAmount: gstBreakdown.igstAmount,
       paymentRequired: true,
       paymentMethod: dto.paymentMethod,
     };

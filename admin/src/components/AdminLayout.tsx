@@ -26,6 +26,7 @@ import {
   Mail,
   UserCheck,
   Star,
+  Settings,
 } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
 
@@ -75,6 +76,7 @@ export const AdminLayout: React.FC = () => {
     {
       label: 'Store Settings',
       items: [
+        { name: 'Shipping Settings', path: '/shipping-settings', icon: Settings, permission: 'SETTINGS_MANAGE' },
         { name: 'Shipping Partners', path: '/delivery-partners', icon: Truck, permission: 'DELIVERY_MANAGE' },
         { name: 'Payment Methods', path: '/gateways', icon: CreditCard, permission: 'SETTINGS_MANAGE' },
       ],

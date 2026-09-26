@@ -11,6 +11,7 @@ import { Pagination } from '../components/Pagination';
 import { useDebounce } from '../hooks/useDebounce';
 import { OrderInvoiceModal } from '../components/OrderInvoiceModal';
 import { ShippingLabelModal } from '../components/ShippingLabelModal';
+import { resolveGstStateCode, getSupplyType } from '../utils/gst.util';
 
 export const OrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -65,7 +66,7 @@ export const OrdersPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [orderUpdating, setOrderUpdating] = useState(false);
   const [statusForm, setStatusForm] = useState({ status: '', notes: '' });
-  const [deliveryForm, setDeliveryForm] = useState({ deliveryPartnerId: '', trackingNumber: '', notes: '' });
+  const [deliveryForm, setDeliveryForm] = useState({ courierName: '', trackingNumber: '', notes: '' });
 
   const fetchDeliveryPartners = async () => {
     try {
@@ -114,9 +115,12 @@ export const OrdersPage: React.FC = () => {
   const handleOpenDetail = async (order: Order) => {
     setSelectedOrder({ ...order, _loading: true });
     setStatusForm({ status: order.orderStatus, notes: '' });
+    const anyOrder = order as any;
+    const currentCourier = anyOrder.courierName || anyOrder.deliveryAssignments?.[0]?.courierName || anyOrder.deliveryAssignments?.[0]?.deliveryPartner?.name || '';
+    const currentTracking = anyOrder.trackingNumber || anyOrder.deliveryAssignments?.[0]?.trackingNumber || '';
     setDeliveryForm({
-      deliveryPartnerId: deliveryPartners.length > 0 ? String(deliveryPartners[0].id) : '',
-      trackingNumber: (order as any).trackingNumber || '',
+      courierName: currentCourier,
+      trackingNumber: currentTracking,
       notes: '',
     });
     setDetailLoading(true);
@@ -124,6 +128,13 @@ export const OrdersPage: React.FC = () => {
       const detail: any = await adminApi.get(`/orders/admin/${order.id}`);
       setSelectedOrder({ ...detail, _loading: false });
       setStatusForm({ status: detail.orderStatus, notes: '' });
+      const fetchedCourier = detail.courierName || detail.deliveryAssignments?.[0]?.courierName || detail.deliveryAssignments?.[0]?.deliveryPartner?.name || '';
+      const fetchedTracking = detail.trackingNumber || detail.deliveryAssignments?.[0]?.trackingNumber || '';
+      setDeliveryForm({
+        courierName: fetchedCourier,
+        trackingNumber: fetchedTracking,
+        notes: '',
+      });
     } catch (err) {
       console.error('Failed to load order detail:', err);
       setSelectedOrder({ ...order, _loading: false });
@@ -155,7 +166,7 @@ export const OrdersPage: React.FC = () => {
 
   const handleAssignDelivery = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedOrder || !deliveryForm.deliveryPartnerId) return;
+    if (!selectedOrder) return;
     const targetId = selectedOrder.id || (selectedOrder as any).data?.id;
     if (!targetId) {
       alert('Invalid order ID.');
@@ -163,16 +174,17 @@ export const OrdersPage: React.FC = () => {
     }
     setOrderUpdating(true);
     try {
-      await adminApi.post(`/orders/admin/${targetId}/assign-delivery`, {
-        deliveryPartnerId: Number(deliveryForm.deliveryPartnerId),
-        trackingNumber: deliveryForm.trackingNumber,
-        notes: deliveryForm.notes,
+      await adminApi.put(`/admin/orders/${targetId}/delivery`, {
+        courierName: deliveryForm.courierName?.trim() || null,
+        trackingNumber: deliveryForm.trackingNumber?.trim() || null,
+        notes: deliveryForm.notes || undefined,
       });
       await fetchOrders();
       const detail: any = await adminApi.get(`/orders/admin/${targetId}`);
       setSelectedOrder(detail);
+      alert('Delivery details updated successfully.');
     } catch (err: any) {
-      alert(err.response?.data?.message || err.message || 'Failed to assign delivery partner');
+      alert(err.response?.data?.message || err.message || 'Failed to update delivery details');
     } finally {
       setOrderUpdating(false);
     }
@@ -474,7 +486,7 @@ export const OrdersPage: React.FC = () => {
 
                       <div style={{ textAlign: 'right', marginLeft: '0.5rem' }}>
                         <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#166534', lineHeight: 1 }}>
-                          ₹{Number(order.totalAmount).toLocaleString('en-IN')}
+                          ₹{Math.round(Number(order.totalAmount)).toLocaleString('en-IN')}
                         </div>
                         <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
                           {itemsList.length} item{itemsList.length === 1 ? '' : 's'}
@@ -1051,25 +1063,109 @@ export const OrdersPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Delivery Partner Card */}
-                <div style={{ padding: '1.1rem', borderRadius: '0.75rem', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
-                  <h5 style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Truck size={12} /> Courier Assignment
-                  </h5>
-                  {selectedOrder.deliveryAssignments?.[0] ? (
-                    <div style={{ fontSize: '0.82rem', color: '#0f172a', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                      <strong>{selectedOrder.deliveryAssignments[0].deliveryPartner?.name || 'Courier'}</strong>
-                      <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: '#0369a1' }}>
-                        {selectedOrder.deliveryAssignments[0].trackingNumber || 'No tracking'}
-                      </span>
-                      <span style={{ fontSize: '0.72rem', background: '#bae6fd', color: '#0369a1', padding: '1px 6px', borderRadius: '4px', fontWeight: 700, display: 'inline-block', width: 'fit-content' }}>
-                        {selectedOrder.deliveryAssignments[0].status}
-                      </span>
+                {/* Shipping Details Card */}
+                {(() => {
+                  const isTN = selectedOrder.shippingZone === 'TAMIL_NADU' ||
+                    (selectedOrder.shippingAddress?.state && (
+                      selectedOrder.shippingAddress.state.toLowerCase().includes('tamil') ||
+                      selectedOrder.shippingAddress.state.toUpperCase() === 'TN'
+                    ));
+                  const zoneLabel = isTN ? 'Tamil Nadu' : 'Outside Tamil Nadu';
+                  const deliveryState = selectedOrder.shippingAddress?.state || (isTN ? 'Tamil Nadu' : 'Interstate');
+                  const totalWeightGrams = Number(selectedOrder.totalWeightGrams ?? (
+                    selectedOrder.items?.reduce((acc: number, it: any) => {
+                      const w = it.variant?.weight ? Number(it.variant.weight) : (it.weight ? Number(it.weight) : 0.5);
+                      const wGrams = w < 10 ? Math.round(w * 1000) : Math.round(w);
+                      return acc + wGrams * (it.quantity || 1);
+                    }, 0) || 1000
+                  ));
+                  const totalWeightKg = `${(totalWeightGrams / 1000).toFixed(2)} KG (${totalWeightGrams}g)`;
+                  const billableUnits = Math.max(1, Math.ceil(totalWeightGrams / 1000));
+                  const billableWeightGrams = billableUnits * 1000;
+                  const billableWeightKg = `${(billableWeightGrams / 1000).toFixed(0)} KG (${billableUnits} slab${billableUnits > 1 ? 's' : ''})`;
+                  const shippingRate = selectedOrder.shippingRate
+                    ? `₹${Number(selectedOrder.shippingRate).toFixed(0)} / KG`
+                    : (isTN ? '₹60 / KG' : '₹120 / KG');
+                  const shippingCharge = `₹${Number(selectedOrder.shippingFee !== undefined && selectedOrder.shippingFee !== null ? selectedOrder.shippingFee : billableUnits * (isTN ? 60 : 120)).toFixed(0)}`;
+                  const estimatedDelivery = selectedOrder.estimatedDelivery || (isTN ? 'Within 2 days' : '3-5 days');
+
+                  return (
+                    <div style={{ padding: '1.1rem', borderRadius: '0.75rem', background: '#f8fafc', border: '1.5px solid #cbd5e1' }}>
+                      <h5 style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1a3d2b', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Truck size={13} color="#059669" /> Shipping Details
+                      </h5>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '0.45rem', fontSize: '0.8rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Delivery State:</span>
+                          <strong style={{ color: '#0f172a' }}>{deliveryState}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Shipping Zone:</span>
+                          <span style={{
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            background: isTN ? '#dcfce7' : '#e0f2fe',
+                            color: isTN ? '#15803d' : '#0369a1',
+                          }}>
+                            {zoneLabel}
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Total Weight:</span>
+                          <strong style={{ color: '#0f172a' }}>{totalWeightKg}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Billable Weight:</span>
+                          <strong style={{ color: '#0f172a' }}>{billableWeightKg}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Shipping Rate:</span>
+                          <strong style={{ color: '#0f172a' }}>{shippingRate}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Shipping Charge:</span>
+                          <strong style={{ color: '#166534' }}>{shippingCharge}</strong>
+                        </div>
+                        <div style={{ gridColumn: 'span 2' }}>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b', display: 'block' }}>Estimated Delivery:</span>
+                          <strong style={{ color: '#0369a1' }}>{estimatedDelivery}</strong>
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <p style={{ fontSize: '0.82rem', color: '#64748b' }}>Not yet assigned</p>
-                  )}
-                </div>
+                  );
+                })()}
+
+                {/* Delivery Assignment Card */}
+                {(() => {
+                  const assignedCourier = selectedOrder.courierName || selectedOrder.deliveryAssignments?.[0]?.courierName || selectedOrder.deliveryAssignments?.[0]?.deliveryPartner?.name || null;
+                  const assignedTracking = selectedOrder.trackingNumber || selectedOrder.deliveryAssignments?.[0]?.trackingNumber || null;
+
+                  return (
+                    <div style={{ padding: '1.1rem', borderRadius: '0.75rem', background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                      <h5 style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Truck size={12} /> Courier Assignment
+                      </h5>
+                      {assignedCourier || assignedTracking ? (
+                        <div style={{ fontSize: '0.82rem', color: '#0f172a', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div>
+                            <span style={{ fontSize: '0.7rem', color: '#64748b', display: 'block' }}>Courier Partner:</span>
+                            <strong style={{ color: '#0f172a' }}>{assignedCourier || 'Not specified'}</strong>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: '0.7rem', color: '#64748b', display: 'block' }}>Tracking / AWB Number:</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#0369a1', fontWeight: 700 }}>
+                              {assignedTracking || 'Not available'}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>Not yet assigned to courier</p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Delivery Address Card */}
@@ -1170,21 +1266,29 @@ export const OrdersPage: React.FC = () => {
                                   Weight: {item.variant.weight}g
                                 </span>
                               )}
-                              {(item.gstRate !== undefined && item.gstRate !== null) && (
-                                <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '0.72rem', padding: '2px 7px', borderRadius: '4px', fontWeight: 700, border: '1px solid #bae6fd' }}>
-                                  GST Rate Snapshot: {Number(item.gstRate)}% (₹{Number(item.gstAmount ?? 0).toLocaleString('en-IN')})
-                                </span>
-                              )}
+                              {(item.gstRate !== undefined && item.gstRate !== null) && (() => {
+                                const customerState = selectedOrder.shippingAddress?.state || selectedOrder.shippingAddress?.stateCode;
+                                const effectiveSupply = item.supplyType || selectedOrder.supplyType || getSupplyType(customerState);
+                                const isIntra = effectiveSupply === 'INTRA_STATE';
+                                const rate = Number(item.gstRate);
+                                return (
+                                  <span style={{ background: '#e0f2fe', color: '#0369a1', fontSize: '0.72rem', padding: '2px 7px', borderRadius: '4px', fontWeight: 700, border: '1px solid #bae6fd' }}>
+                                    {isIntra
+                                      ? `GST ${rate}% (CGST ${rate / 2}% + SGST ${rate / 2}%) : ₹${Number(item.gstAmount ?? 0).toFixed(2)}`
+                                      : `IGST ${rate}% : ₹${Number(item.gstAmount ?? 0).toFixed(2)}`}
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </div>
 
                           {/* Calculation (qty x unit price) */}
                           <div style={{ textAlign: 'right', flexShrink: 0 }}>
                             <p style={{ fontWeight: 900, fontSize: '1.05rem', color: '#1a3d2b', margin: 0 }}>
-                              ₹{Number(item.totalPrice).toLocaleString('en-IN')}
+                              ₹{Number(item.totalPrice).toFixed(2)}
                             </p>
                             <p style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
-                              {item.quantity} × ₹{Number(item.unitPrice).toLocaleString('en-IN')}
+                              {item.quantity} × ₹{Number(item.unitPrice).toFixed(2)}
                             </p>
                           </div>
                         </div>
@@ -1192,30 +1296,99 @@ export const OrdersPage: React.FC = () => {
                     })}
 
                     {/* Totals Summary */}
-                    <div style={{ padding: '1rem 1.25rem', background: '#f8fafc', borderTop: '2px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ width: '270px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.88rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
-                          <span>Items Subtotal</span>
-                          <span style={{ fontWeight: 700 }}>₹{Number(selectedOrder.subtotal || selectedOrder.totalAmount || 0).toLocaleString('en-IN')}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
-                          <span>Shipping Fee</span>
-                          <span style={{ fontWeight: 700, color: Number(selectedOrder.shippingFee || 0) === 0 ? '#166534' : 'inherit' }}>
-                            {Number(selectedOrder.shippingFee || 0) === 0 ? 'FREE' : `₹${Number(selectedOrder.shippingFee).toLocaleString('en-IN')}`}
-                          </span>
-                        </div>
-                        {Number(selectedOrder.taxAmount || 0) > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
-                            <span>Tax (GST)</span>
-                            <span style={{ fontWeight: 700 }}>₹{Number(selectedOrder.taxAmount).toLocaleString('en-IN')}</span>
+                    {(() => {
+                      const customerState = selectedOrder.shippingAddress?.state || selectedOrder.shippingAddress?.stateCode;
+                      const effectiveSupplyType = selectedOrder.supplyType || getSupplyType(customerState);
+                      const isIntraState = effectiveSupplyType === 'INTRA_STATE';
+                      const subtotal = Number(selectedOrder.subtotal || 0);
+                      const taxAmount = Number(selectedOrder.taxAmount || 0);
+                      const taxableAmount = selectedOrder.taxableAmount !== undefined ? Number(selectedOrder.taxableAmount) : Math.max(0, subtotal - taxAmount);
+                      const cgstAmount = isIntraState ? (selectedOrder.cgstAmount !== undefined ? Number(selectedOrder.cgstAmount) : Math.round((taxAmount / 2) * 100) / 100) : 0;
+                      const sgstAmount = isIntraState ? (selectedOrder.sgstAmount !== undefined ? Number(selectedOrder.sgstAmount) : Math.round((taxAmount - cgstAmount) * 100) / 100) : 0;
+                      const igstAmount = !isIntraState ? (selectedOrder.igstAmount !== undefined ? Number(selectedOrder.igstAmount) : taxAmount) : 0;
+                      const shippingFee = Number(selectedOrder.shippingFee || 0);
+                      const rawTotal = subtotal + shippingFee;
+                      // finalTotal from DB (already Math.round'ed to nearest rupee at checkout)
+                      const finalTotal = Math.round(Number(selectedOrder.totalAmount || rawTotal));
+                      // roundOff = small rounding adjustment (should be near 0 for new orders)
+                      const roundOff = Math.round((finalTotal - rawTotal) * 100) / 100;
+
+                      return (
+                        <div style={{ padding: '1.25rem', background: '#f8fafc', borderTop: '2px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontWeight: 800, color: '#334155' }}>Supply Type:</span>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                                background: isIntraState ? '#dcfce7' : '#e0e7ff',
+                                color: isIntraState ? '#15803d' : '#4338ca',
+                                border: isIntraState ? '1px solid #bbf7d0' : '1px solid #c7d2fe'
+                              }}>
+                                {isIntraState ? 'INTRA-STATE (TN → TN)' : `INTER-STATE (TN → ${selectedOrder.shippingAddress?.state || 'Other'})`}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                              Seller Code: 33 (TN) | Customer Code: {selectedOrder.customerStateCode || resolveGstStateCode(customerState)}
+                            </span>
                           </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '1.1rem', color: '#0f172a', borderTop: '2px solid #cbd5e1', paddingTop: '8px', marginTop: '3px' }}>
-                          <span>Grand Total</span>
-                          <span style={{ color: '#1a3d2b' }}>₹{Number(selectedOrder.totalAmount).toLocaleString('en-IN')}</span>
+
+                          <div style={{ width: '290px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.88rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
+                              <span>Products Subtotal</span>
+                              <span style={{ fontWeight: 700 }}>₹{subtotal.toFixed(2)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
+                              <span>Price Before Tax</span>
+                              <span style={{ fontWeight: 700 }}>₹{taxableAmount.toFixed(2)}</span>
+                            </div>
+                            {taxAmount > 0 && (
+                              <>
+                                {isIntraState ? (
+                                  <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1' }}>
+                                      <span>Central Govt Tax (CGST)</span>
+                                      <span style={{ fontWeight: 700 }}>₹{cgstAmount.toFixed(2)}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1' }}>
+                                      <span>State Govt Tax (SGST)</span>
+                                      <span style={{ fontWeight: 700 }}>₹{sgstAmount.toFixed(2)}</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#0369a1' }}>
+                                    <span>Integrated Interstate Tax (IGST)</span>
+                                    <span style={{ fontWeight: 700 }}>₹{igstAmount.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontSize: '0.82rem', borderTop: '1px dashed #e2e8f0', paddingTop: '4px' }}>
+                                  <span style={{ fontWeight: 700 }}>Total Tax (Included in Price)</span>
+                                  <span style={{ fontWeight: 700 }}>₹{taxAmount.toFixed(2)}</span>
+                                </div>
+                              </>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
+                              <span>Delivery Charges</span>
+                              <span style={{ fontWeight: 700, color: shippingFee === 0 ? '#166534' : 'inherit' }}>
+                                {shippingFee === 0 ? 'FREE' : `₹${shippingFee.toFixed(2)}`}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
+                              <span>Round Off</span>
+                              <span style={{ fontWeight: 700 }}>
+                                {roundOff >= 0 ? `+₹${roundOff.toFixed(2)}` : `-₹${Math.abs(roundOff).toFixed(2)}`}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: '1.1rem', color: '#0f172a', borderTop: '2px solid #cbd5e1', paddingTop: '8px', marginTop: '3px' }}>
+                              <span>Final Total Paid</span>
+                              <span style={{ color: '#1a3d2b' }}>₹{finalTotal.toLocaleString('en-IN')}</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
                   </>
                 )}
               </div>
@@ -1266,32 +1439,33 @@ export const OrdersPage: React.FC = () => {
                   </div>
                 </form>
 
-                {/* Assign Courier Partner */}
+                {/* Shipping & Delivery Manual Assignment */}
                 <form onSubmit={handleAssignDelivery} style={{ padding: '1.15rem', borderRadius: '0.75rem', border: '1.5px solid #cbd5e1', background: '#ffffff' }}>
-                  <h5 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1a3d2b', marginBottom: '0.75rem' }}>
-                    Assign Courier Partner
+                  <h5 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1a3d2b', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Truck size={15} /> Shipping & Delivery
                   </h5>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>COURIER</label>
-                      <select
-                        value={deliveryForm.deliveryPartnerId}
-                        onChange={(e) => setDeliveryForm({ ...deliveryForm, deliveryPartnerId: e.target.value })}
-                        className="form-select"
-                        style={{ width: '100%', padding: '0.55rem', borderRadius: '0.5rem', border: '1.5px solid #cbd5e1', fontWeight: 700, fontSize: '0.85rem' }}
-                      >
-                        <option value="" disabled>-- Select Courier Partner --</option>
-                        {deliveryPartners.map((dp) => (
-                          <option key={dp.id} value={dp.id}>{dp.name} ({dp.partnerCode})</option>
-                        ))}
-                      </select>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                        COURIER / DELIVERY PARTNER NAME
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter courier name (e.g. DTDC, Local Delivery)"
+                        value={deliveryForm.courierName}
+                        onChange={(e) => setDeliveryForm({ ...deliveryForm, courierName: e.target.value })}
+                        className="form-input"
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: '0.5rem', border: '1.5px solid #cbd5e1', fontSize: '0.85rem' }}
+                      />
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>AWB / TRACKING NO.</label>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                        AWB / TRACKING NUMBER
+                      </label>
                       <input
                         type="text"
-                        placeholder="e.g. BD-8923-4412"
+                        placeholder="Enter AWB / Tracking Number"
                         value={deliveryForm.trackingNumber}
                         onChange={(e) => setDeliveryForm({ ...deliveryForm, trackingNumber: e.target.value })}
                         className="form-input"
@@ -1301,11 +1475,11 @@ export const OrdersPage: React.FC = () => {
 
                     <button
                       type="submit"
-                      disabled={orderUpdating || !deliveryForm.deliveryPartnerId}
+                      disabled={orderUpdating}
                       className="btn-primary"
                       style={{ padding: '0.6rem 1rem', fontSize: '0.85rem', fontWeight: 800, borderRadius: '0.5rem', marginTop: '0.25rem' }}
                     >
-                      {orderUpdating ? 'Saving...' : 'Assign & Save Courier'}
+                      {orderUpdating ? 'Saving...' : 'Assign & Save Delivery'}
                     </button>
                   </div>
                 </form>

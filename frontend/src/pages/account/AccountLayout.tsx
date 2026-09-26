@@ -31,17 +31,8 @@ export const AccountLayout: React.FC = () => {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #f0fdf4 0%, #fdf6ec 100%)', paddingTop: '2rem', paddingBottom: '3rem' }}>
+    <div style={{ minHeight: 'calc(100vh - 5.5rem)', background: 'linear-gradient(135deg, #f0fdf4 0%, #fdf6ec 100%)', paddingTop: '1rem', paddingBottom: '1rem' }}>
       <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '0 1.25rem' }}>
-
-        {/* Page Title */}
-        <div style={{ marginBottom: '1.75rem' }}>
-          <h1 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#0f172a', fontFamily: 'Outfit, sans-serif' }}>My Account</h1>
-          <p style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '4px' }}>
-            Manage your profile, addresses, and order history
-          </p>
-        </div>
-
         <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '1.5rem', alignItems: 'start' }}>
 
           {/* Sidebar */}
