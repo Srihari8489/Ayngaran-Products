@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateGatewayDto } from './dto/update-gateway.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -14,7 +15,10 @@ export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
   private readonly encryptionKey: string;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {
     this.encryptionKey =
       process.env.ENCRYPTION_KEY || '01234567890123456789012345678901';
   }
@@ -262,7 +266,7 @@ export class PaymentsService {
     }
 
     // 2. Authoritative Database Transaction: Re-check stock, deduct stock, log to ledger, confirm order
-    return this.prisma.raw.$transaction(async (tx) => {
+    const result = await this.prisma.raw.$transaction(async (tx) => {
       // Step A: Re-check stock for EVERY item inside the transaction boundary
       for (const item of order.items) {
         if (item.variantId) {
@@ -355,5 +359,14 @@ export class PaymentsService {
         totalAmount: confirmedOrder.totalAmount,
       };
     });
+
+    // AFTER successful transaction commit: trigger real-time WebSocket and email notification
+    this.notificationsService.notifyOrderCreated(result.orderId).catch((err) => {
+      this.logger.error(
+        `Failed to trigger new order notification for #${result.orderNumber}: ${err.message}`,
+      );
+    });
+
+    return result;
   }
 }

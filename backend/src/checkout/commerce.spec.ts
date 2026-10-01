@@ -14,8 +14,9 @@ async function testCommerceEngine() {
 
   const shippingService = new ShippingService(prisma);
   const cartService = new CartService(prisma, shippingService);
-  const checkoutService = new CheckoutService(prisma, shippingService);
-  const paymentsService = new PaymentsService(prisma);
+  const mockNotificationsService: any = { notifyOrderCreated: async () => {} };
+  const checkoutService = new CheckoutService(prisma, shippingService, mockNotificationsService);
+  const paymentsService = new PaymentsService(prisma, mockNotificationsService);
   const reviewsService = new ReviewsService(prisma);
   const reportsService = new ReportsService(prisma);
 

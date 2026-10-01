@@ -7,6 +7,8 @@ import { StaffJwtAuthGuard } from '../common/guards/staff-jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 
 import { OtpDeliveryService } from './otp-delivery.service';
+import { EmailDeliveryService } from './email-delivery.service';
+import { EmailOtpService } from './email-otp.service';
 
 @Module({
   imports: [
@@ -16,7 +18,24 @@ import { OtpDeliveryService } from './otp-delivery.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, OtpDeliveryService, JwtAuthGuard, StaffJwtAuthGuard, PermissionsGuard],
-  exports: [AuthService, OtpDeliveryService, JwtModule, JwtAuthGuard, StaffJwtAuthGuard, PermissionsGuard],
+  providers: [
+    AuthService,
+    OtpDeliveryService,
+    EmailDeliveryService,
+    EmailOtpService,
+    JwtAuthGuard,
+    StaffJwtAuthGuard,
+    PermissionsGuard,
+  ],
+  exports: [
+    AuthService,
+    OtpDeliveryService,
+    EmailDeliveryService,
+    EmailOtpService,
+    JwtModule,
+    JwtAuthGuard,
+    StaffJwtAuthGuard,
+    PermissionsGuard,
+  ],
 })
 export class AuthModule {}

@@ -23,10 +23,12 @@ import {
   MessageSquare
 } from 'lucide-react';
 import adminApi from '../api/client';
+import { useOrderNotifications } from '../context/OrderNotificationContext';
 
 export const DashboardPage: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { subscribeToNewOrders } = useOrderNotifications();
 
   useEffect(() => {
     adminApi
@@ -37,6 +39,45 @@ export const DashboardPage: React.FC = () => {
       .catch((err) => console.error('Failed to load dashboard:', err))
       .finally(() => setLoading(false));
   }, []);
+
+  // Update Dashboard in real-time when new order event arrives
+  useEffect(() => {
+    const unsubscribe = subscribeToNewOrders((newOrder) => {
+      setData((prev: any) => {
+        if (!prev) return prev;
+        const currentMetrics = prev.metrics || {};
+        const isPaid = newOrder.paymentStatus === 'PAID';
+        return {
+          ...prev,
+          metrics: {
+            ...currentMetrics,
+            totalOrders: (currentMetrics.totalOrders || 0) + 1,
+            totalRevenue: isPaid
+              ? (Number(currentMetrics.totalRevenue) || 0) + newOrder.totalAmount
+              : currentMetrics.totalRevenue,
+            pendingOrdersCount:
+              newOrder.orderStatus === 'PENDING'
+                ? (currentMetrics.pendingOrdersCount || 0) + 1
+                : currentMetrics.pendingOrdersCount,
+          },
+          recentOrders: [
+            {
+              id: newOrder.orderId,
+              orderNumber: newOrder.orderNumber,
+              totalAmount: newOrder.totalAmount,
+              orderStatus: newOrder.orderStatus,
+              paymentStatus: newOrder.paymentStatus,
+              createdAt: newOrder.createdAt,
+              user: { name: newOrder.customerName },
+            },
+            ...(prev.recentOrders || []),
+          ].slice(0, 10),
+        };
+      });
+    });
+
+    return () => unsubscribe();
+  }, [subscribeToNewOrders]);
 
   if (loading) {
     return (

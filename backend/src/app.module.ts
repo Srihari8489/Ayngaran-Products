@@ -22,6 +22,8 @@ import { NewsletterModule } from './newsletter/newsletter.module';
 import { UsersModule } from './users/users.module';
 import { FeedbackModule } from './feedback/feedback.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { SpotBillingModule } from './spot-billing/spot-billing.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { ShippingModule } from './shipping/shipping.module';
     UsersModule,
     FeedbackModule,
     ShippingModule,
+    SpotBillingModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

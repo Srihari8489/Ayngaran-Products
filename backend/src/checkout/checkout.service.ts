@@ -2,17 +2,22 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { computeGstBreakdown } from '../common/utils/gst.util';
 import { ShippingService } from '../shipping/shipping.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class CheckoutService {
+  private readonly logger = new Logger(CheckoutService.name);
+
   constructor(
     private prisma: PrismaService,
     private shippingService: ShippingService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async processCheckout(userId: number, dto: CheckoutDto) {
@@ -252,7 +257,7 @@ export class CheckoutService {
 
     // CASE 1: CASH ON DELIVERY (COD)
     if (dto.paymentMethod === 'COD') {
-      return this.prisma.raw.$transaction(async (tx) => {
+      const codResult = await this.prisma.raw.$transaction(async (tx) => {
         // Authoritative stock deduction inside transaction
         for (const item of validatedItems) {
           if (item.variantId) {
@@ -360,6 +365,13 @@ export class CheckoutService {
           paymentRequired: false,
         };
       });
+
+      // AFTER successful commit: dispatch real-time WebSocket and email notification
+      this.notificationsService.notifyOrderCreated(codResult.orderId).catch((err) => {
+        this.logger.error(`Failed to trigger new order notification for #${codResult.orderNumber}: ${err.message}`);
+      });
+
+      return codResult;
     }
 
     // CASE 2: ONLINE PAYMENT (MOCK / RAZORPAY / STRIPE)

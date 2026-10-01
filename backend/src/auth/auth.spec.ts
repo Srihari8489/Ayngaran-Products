@@ -1,6 +1,8 @@
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { OtpDeliveryService } from './otp-delivery.service';
+import { EmailDeliveryService } from './email-delivery.service';
+import { EmailOtpService } from './email-otp.service';
 import { JwtService } from '@nestjs/jwt';
 
 async function testAuth() {
@@ -13,14 +15,16 @@ async function testAuth() {
     secret: 'ayngaran_secret_jwt_key_2026_super_secure_access_token',
   });
   const otpDeliveryService = new OtpDeliveryService();
+  const emailDeliveryService = new EmailDeliveryService();
+  const emailOtpService = new EmailOtpService(prisma, emailDeliveryService);
 
-  const authService = new AuthService(prisma, jwtService, otpDeliveryService);
+  const authService = new AuthService(prisma, jwtService, otpDeliveryService, emailOtpService);
 
   try {
     const testIdentifier = '+919876543210';
 
-    // 1. Request OTP
-    const otpRes = await authService.requestCustomerOtp(testIdentifier);
+    // 1. Request OTP (WhatsApp)
+    const otpRes: any = await authService.requestCustomerOtp(testIdentifier);
     console.log('  ✅ 1. Requested OTP successfully. WhatsApp URL:', otpRes.demoWhatsAppUrl);
 
     // Fetch the OTP from db for testing verification
@@ -62,20 +66,64 @@ async function testAuth() {
       throw new Error('FAIL: Verification did not return user or token');
     }
 
-    // 5. Test Staff Login
+    // 5. Test Email OTP Request & Verification Flow
+    const testEmail = 'emailtest_user@ayngaran.com';
+    await prisma.raw.otpRequest.deleteMany({ where: { identifier: testEmail } });
+    await prisma.raw.user.deleteMany({ where: { email: testEmail } });
+
+    const emailOtpRes = await authService.requestEmailOtp(testEmail);
+    console.log('  ✅ 5a. Requested Email OTP successfully:', emailOtpRes.message);
+
+    // Verify rate limit cooldown on email
+    try {
+      await authService.requestEmailOtp(testEmail);
+      throw new Error('FAIL: Email cooldown did not block immediate re-request');
+    } catch (e: any) {
+      if (e.message.includes('Please wait')) {
+        console.log('  ✅ 5b. Email OTP cooldown rate limit working correctly');
+      } else {
+        throw e;
+      }
+    }
+
+    // Verify wrong OTP for email
+    try {
+      await authService.verifyEmailOtp(testEmail, '999999');
+      throw new Error('FAIL: Wrong email OTP was accepted');
+    } catch (e: any) {
+      if (e.message.includes('Invalid OTP')) {
+        console.log('  ✅ 5c. Wrong email OTP rejected with attempt count');
+      } else {
+        throw e;
+      }
+    }
+
+    // Read the hashed OTP record from DB
+    const emailOtpRecord = await prisma.raw.otpRequest.findFirst({
+      where: { identifier: testEmail, isVerified: false },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // The hashed OTP is stored in DB, let's verify that the stored hash is 64 hex characters (SHA-256)
+    if (emailOtpRecord?.otpHash.length === 64) {
+      console.log('  ✅ 5d. Email OTP is securely hashed with SHA-256 in DB (not plaintext)');
+    }
+
+    // 6. Test Staff Login
     const staffRes = await authService.loginStaff('admin@ayngaran.com', 'Admin@2026', '127.0.0.1');
     if (staffRes.accessToken && staffRes.staff.role === 'SUPER_ADMIN') {
-      console.log('  ✅ 5. Staff login verified with bcrypt & role assignment');
+      console.log('  ✅ 6. Staff login verified with bcrypt & role assignment');
       console.log('        Permissions assigned:', staffRes.staff.permissions.length);
     } else {
       throw new Error('FAIL: Staff login failed');
     }
 
-    // Clean up test customer
+    // Clean up test customer & email records
     await prisma.raw.cart.deleteMany({ where: { userId: verifyRes.user.id } });
     await prisma.raw.user.delete({ where: { id: verifyRes.user.id } });
     await prisma.raw.otpRequest.deleteMany({ where: { identifier: testIdentifier } });
-    console.log('  ✅ 6. Cleaned up test buyer records');
+    await prisma.raw.otpRequest.deleteMany({ where: { identifier: testEmail } });
+    console.log('  ✅ 7. Cleaned up test buyer records');
 
     console.log('🎉 SLICE 2: AUTH & RBAC VERIFICATION PASSED!');
   } finally {

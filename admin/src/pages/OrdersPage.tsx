@@ -3,7 +3,7 @@ import {
   ShoppingBag, Search, Truck, CheckCircle2, Clock, XCircle,
   Package, User as UserIcon, MapPin, CreditCard, Phone, Mail,
   X, RefreshCw, ChevronDown, ChevronUp, Eye, Tag, LayoutGrid, List,
-  Calendar, ArrowRight, FileText, Printer, Download
+  Calendar, ArrowRight, FileText, Printer, Download, Bell
 } from 'lucide-react';
 import adminApi from '../api/client';
 import { Order, DeliveryPartner, PaginationMeta } from '../types';
@@ -12,6 +12,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { OrderInvoiceModal } from '../components/OrderInvoiceModal';
 import { ShippingLabelModal } from '../components/ShippingLabelModal';
 import { resolveGstStateCode, getSupplyType } from '../utils/gst.util';
+import { useOrderNotifications, OrderNotificationItem } from '../context/OrderNotificationContext';
 
 export const OrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -32,6 +33,11 @@ export const OrdersPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 350);
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
+
+  // Real-time Order Notifications Integration
+  const { subscribeToNewOrders, subscribeToReconnect } = useOrderNotifications();
+  const [newOrderToast, setNewOrderToast] = useState<OrderNotificationItem | null>(null);
+  const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
 
   // Modals for Invoice & Shipping Label
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
@@ -65,7 +71,7 @@ export const OrdersPage: React.FC = () => {
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [orderUpdating, setOrderUpdating] = useState(false);
-  const [statusForm, setStatusForm] = useState({ status: '', notes: '' });
+  const [statusForm, setStatusForm] = useState({ status: '', notes: '', courierName: '', trackingNumber: '' });
   const [deliveryForm, setDeliveryForm] = useState({ courierName: '', trackingNumber: '', notes: '' });
 
   const fetchDeliveryPartners = async () => {
@@ -112,12 +118,104 @@ export const OrdersPage: React.FC = () => {
     fetchOrders();
   }, [page, limit, debouncedSearch, selectedStatusFilter, selectedPaymentFilter]);
 
+  // Read highlight order query parameter from notification link
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const highlight = params.get('highlight');
+    if (highlight) {
+      setHighlightedOrderId(Number(highlight));
+      setTimeout(() => setHighlightedOrderId(null), 8000);
+    }
+  }, []);
+
+  // Real-time WebSocket Order Subscription with Server-Side Pagination & Filter Respect
+  useEffect(() => {
+    const unsubscribe = subscribeToNewOrders(async (newOrder) => {
+      // 1. Show In-Page Alert Banner
+      setNewOrderToast(newOrder);
+
+      // 2. Fetch authoritative order payload from REST API
+      try {
+        const fullDetail: any = await adminApi.get(`/orders/admin/${newOrder.orderId}`);
+        const freshOrder = fullDetail?.id ? fullDetail : null;
+        if (!freshOrder) return;
+
+        // 3. Deduplication Check
+        setOrders((prev) => {
+          if (prev.some((o) => o.id === freshOrder.id || o.orderNumber === freshOrder.orderNumber)) {
+            return prev;
+          }
+
+          // 4. Filter Match Verification
+          const statusMatch =
+            selectedStatusFilter === 'ALL' || freshOrder.orderStatus === selectedStatusFilter;
+          const paymentMatch =
+            selectedPaymentFilter === 'ALL' || freshOrder.paymentStatus === selectedPaymentFilter;
+
+          let searchMatch = true;
+          if (debouncedSearch) {
+            const query = debouncedSearch.toLowerCase();
+            const orderNum = (freshOrder.orderNumber || '').toLowerCase();
+            const custName = (freshOrder.user?.name || '').toLowerCase();
+            const custEmail = (freshOrder.user?.email || '').toLowerCase();
+            searchMatch =
+              orderNum.includes(query) ||
+              custName.includes(query) ||
+              custEmail.includes(query);
+          }
+
+          // 5. Pagination & Filter Rule:
+          // If admin is on Page 1 and matches current filters, prepend at top!
+          if (page === 1 && statusMatch && paymentMatch && searchMatch) {
+            setHighlightedOrderId(freshOrder.id);
+            setTimeout(() => setHighlightedOrderId(null), 8000);
+
+            // Update total count
+            setPagination((p) => ({
+              ...p,
+              total: p.total + 1,
+            }));
+
+            // Prepend new order, trim 21st to maintain limit
+            const updated = [freshOrder, ...prev];
+            return updated.slice(0, limit);
+          } else {
+            // Admin is on Page 2+ or filters don't match: Do NOT corrupt view, but update total counter
+            setPagination((p) => ({
+              ...p,
+              total: p.total + 1,
+            }));
+            return prev;
+          }
+        });
+      } catch (err) {
+        console.error('Failed to load real-time notified order:', err);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [page, limit, selectedStatusFilter, selectedPaymentFilter, debouncedSearch, subscribeToNewOrders]);
+
+  // Reconnection recovery: Refresh orders list from REST API on socket reconnect
+  useEffect(() => {
+    const unsubscribeReconnect = subscribeToReconnect(() => {
+      console.log('Admin socket reconnected: refreshing authoritative orders list...');
+      fetchOrders();
+    });
+    return () => unsubscribeReconnect();
+  }, [fetchOrders, subscribeToReconnect]);
+
   const handleOpenDetail = async (order: Order) => {
     setSelectedOrder({ ...order, _loading: true });
-    setStatusForm({ status: order.orderStatus, notes: '' });
     const anyOrder = order as any;
     const currentCourier = anyOrder.courierName || anyOrder.deliveryAssignments?.[0]?.courierName || anyOrder.deliveryAssignments?.[0]?.deliveryPartner?.name || '';
     const currentTracking = anyOrder.trackingNumber || anyOrder.deliveryAssignments?.[0]?.trackingNumber || '';
+    setStatusForm({
+      status: order.orderStatus,
+      notes: '',
+      courierName: currentCourier,
+      trackingNumber: currentTracking,
+    });
     setDeliveryForm({
       courierName: currentCourier,
       trackingNumber: currentTracking,
@@ -127,9 +225,14 @@ export const OrdersPage: React.FC = () => {
     try {
       const detail: any = await adminApi.get(`/orders/admin/${order.id}`);
       setSelectedOrder({ ...detail, _loading: false });
-      setStatusForm({ status: detail.orderStatus, notes: '' });
       const fetchedCourier = detail.courierName || detail.deliveryAssignments?.[0]?.courierName || detail.deliveryAssignments?.[0]?.deliveryPartner?.name || '';
       const fetchedTracking = detail.trackingNumber || detail.deliveryAssignments?.[0]?.trackingNumber || '';
+      setStatusForm({
+        status: detail.orderStatus,
+        notes: '',
+        courierName: fetchedCourier,
+        trackingNumber: fetchedTracking,
+      });
       setDeliveryForm({
         courierName: fetchedCourier,
         trackingNumber: fetchedTracking,
@@ -153,10 +256,20 @@ export const OrdersPage: React.FC = () => {
     }
     setOrderUpdating(true);
     try {
-      await adminApi.patch(`/orders/admin/${targetId}/status`, statusForm);
+      await adminApi.patch(`/orders/admin/${targetId}/status`, {
+        status: statusForm.status,
+        notes: statusForm.notes,
+        courierName: statusForm.courierName?.trim() || null,
+        trackingNumber: statusForm.trackingNumber?.trim() || null,
+      });
       await fetchOrders();
       const detail: any = await adminApi.get(`/orders/admin/${targetId}`);
       setSelectedOrder(detail);
+      setDeliveryForm((prev) => ({
+        ...prev,
+        courierName: statusForm.courierName,
+        trackingNumber: statusForm.trackingNumber,
+      }));
     } catch (err: any) {
       alert(err.response?.data?.message || err.message || 'Failed to update order status');
     } finally {
@@ -182,6 +295,11 @@ export const OrdersPage: React.FC = () => {
       await fetchOrders();
       const detail: any = await adminApi.get(`/orders/admin/${targetId}`);
       setSelectedOrder(detail);
+      setStatusForm((prev) => ({
+        ...prev,
+        courierName: deliveryForm.courierName,
+        trackingNumber: deliveryForm.trackingNumber,
+      }));
       alert('Delivery details updated successfully.');
     } catch (err: any) {
       alert(err.response?.data?.message || err.message || 'Failed to update delivery details');
@@ -269,6 +387,91 @@ export const OrdersPage: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', paddingBottom: '3rem' }}>
+
+      {/* ── Real-Time New Order Incoming Notification Banner ── */}
+      {newOrderToast && (
+        <div
+          style={{
+            padding: '1rem 1.4rem',
+            backgroundColor: '#f0fdf4',
+            border: '2px solid #86efac',
+            borderRadius: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            boxShadow: '0 8px 24px -4px rgba(34, 197, 94, 0.2)',
+            animation: 'fadeInSlide 0.25s ease-out',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <div
+              style={{
+                width: '2.6rem',
+                height: '2.6rem',
+                borderRadius: '0.75rem',
+                backgroundColor: '#dcfce7',
+                color: '#16a34a',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                border: '1.5px solid #bbf7d0',
+              }}
+            >
+              <Bell size={20} />
+            </div>
+            <div>
+              <p style={{ margin: 0, fontWeight: 900, fontSize: '0.98rem', color: '#14532d' }}>
+                🔔 New Order Received: #{newOrderToast.orderNumber}
+              </p>
+              <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.84rem', color: '#166534' }}>
+                Customer: <strong>{newOrderToast.customerName}</strong> • {newOrderToast.itemCount} items ({newOrderToast.quantity} qty) • Total: <strong>₹{newOrderToast.totalAmount.toFixed(2)}</strong> ({newOrderToast.paymentStatus === 'PAID' ? 'PAID' : 'Cash on Delivery'})
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedStatusFilter('ALL');
+                setSelectedPaymentFilter('ALL');
+                setSearch('');
+                setPage(1);
+                setHighlightedOrderId(newOrderToast.orderId);
+                setNewOrderToast(null);
+              }}
+              className="btn-primary"
+              style={{
+                fontSize: '0.84rem',
+                padding: '0.5rem 1rem',
+                backgroundColor: '#15803d',
+                cursor: 'pointer',
+              }}
+            >
+              View Order →
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewOrderToast(null)}
+              title="Dismiss alert"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#15803d',
+                padding: '0.4rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── 1. Page Header ── */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -430,15 +633,17 @@ export const OrdersPage: React.FC = () => {
               const customer = order.user || (order as any).customer || {};
               const location = (order as any).location || 'India';
               const courier = (order as any).deliveryPartner || 'Unassigned';
+              const isHighlighted = order.id === highlightedOrderId;
 
               return (
                 <div
                   key={order.id}
+                  className={isHighlighted ? 'new-order-highlight' : ''}
                   style={{
-                    background: '#ffffff',
+                    background: isHighlighted ? '#f0fdf4' : '#ffffff',
                     borderRadius: '1.1rem',
-                    border: '1.5px solid #e2e8f0',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                    border: isHighlighted ? '2px solid #22c55e' : '1.5px solid #e2e8f0',
+                    boxShadow: isHighlighted ? '0 0 18px rgba(34, 197, 94, 0.3)' : '0 2px 10px rgba(0,0,0,0.03)',
                     overflow: 'hidden',
                     transition: 'all 0.2s ease',
                   }}
@@ -762,9 +967,18 @@ export const OrdersPage: React.FC = () => {
                   const firstItem = itemsList[0];
                   const extraCount = Math.max(0, itemsList.length - 1);
                   const customer = order.user || (order as any).customer || {};
+                  const isHighlighted = order.id === highlightedOrderId;
 
                   return (
-                    <tr key={order.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background-color 0.15s' }}>
+                    <tr
+                      key={order.id}
+                      className={isHighlighted ? 'new-order-highlight' : ''}
+                      style={{
+                        borderBottom: '1px solid #f1f5f9',
+                        backgroundColor: isHighlighted ? '#f0fdf4' : 'transparent',
+                        transition: 'background-color 0.25s',
+                      }}
+                    >
                       {/* Order # */}
                       <td style={{ padding: '0.9rem 1rem', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
                         <span style={{ fontFamily: 'monospace', fontWeight: 900, color: '#1a3d2b', fontSize: '0.88rem', background: '#dcfce7', padding: '3px 8px', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
@@ -1423,6 +1637,34 @@ export const OrdersPage: React.FC = () => {
                         placeholder="e.g. Verified payment details..."
                         value={statusForm.notes}
                         onChange={(e) => setStatusForm({ ...statusForm, notes: e.target.value })}
+                        className="form-input"
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: '0.5rem', border: '1.5px solid #cbd5e1', fontSize: '0.85rem' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                        COURIER / DELIVERY PARTNER NAME
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Professional Couriers, DTDC, Local Express"
+                        value={statusForm.courierName}
+                        onChange={(e) => setStatusForm({ ...statusForm, courierName: e.target.value })}
+                        className="form-input"
+                        style={{ width: '100%', padding: '0.55rem', borderRadius: '0.5rem', border: '1.5px solid #cbd5e1', fontSize: '0.85rem' }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
+                        AWB / TRACKING NUMBER
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter AWB / Tracking Number"
+                        value={statusForm.trackingNumber}
+                        onChange={(e) => setStatusForm({ ...statusForm, trackingNumber: e.target.value })}
                         className="form-input"
                         style={{ width: '100%', padding: '0.55rem', borderRadius: '0.5rem', border: '1.5px solid #cbd5e1', fontSize: '0.85rem' }}
                       />

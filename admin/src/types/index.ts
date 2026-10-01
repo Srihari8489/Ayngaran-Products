@@ -294,3 +294,115 @@ export interface CustomerFeedback {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface SpotBillItem {
+  id: number;
+  spotBillId: number;
+  productId: number;
+  variantId?: number | null;
+  productNameSnapshot: string;
+  productCodeSnapshot: string;
+  brandSnapshot?: string | null;
+  skuSnapshot: string;
+  variantLabelSnapshot?: string | null;
+  imageUrlSnapshot?: string | null;
+  unitPrice: number;
+  quantity: number;
+  returnedQuantity: number;
+  discountAmount: number;
+  taxableAmount: number;
+  gstRate: number;
+  cgstRate: number;
+  cgstAmount: number;
+  sgstRate: number;
+  sgstAmount: number;
+  igstRate: number;
+  igstAmount: number;
+  totalTaxAmount: number;
+  totalPrice: number;
+  createdAt?: string;
+}
+
+export interface SpotBillPayment {
+  id: number;
+  spotBillId: number;
+  paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'OTHER';
+  amount: number;
+  amountReceived?: number | null;
+  changeReturned?: number | null;
+  referenceNumber?: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface SpotBillReturnItem {
+  id: number;
+  returnId: number;
+  spotBillItemId: number;
+  productId: number;
+  variantId?: number | null;
+  quantity: number;
+  unitPrice: number;
+  refundAmount: number;
+  createdAt: string;
+}
+
+export interface SpotBillReturn {
+  id: number;
+  returnNumber: string;
+  spotBillId: number;
+  staffId: number;
+  staffName: string;
+  reason: string;
+  refundAmount: number;
+  refundMethod: string;
+  refundReference?: string | null;
+  status: string;
+  createdAt: string;
+  items?: SpotBillReturnItem[];
+}
+
+export interface SpotBill {
+  id: number;
+  billNumber: string;
+  invoiceNumber: string;
+  customerId?: number | null;
+  cashierId: number;
+  cashierName: string;
+  customerName: string;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  customerGstin?: string | null;
+  customerAddress?: string | null;
+  customerState: string;
+  customerStateCode: string;
+  supplyType: 'INTRA_STATE' | 'INTER_STATE';
+  subtotal: number;
+  discountType?: 'FIXED' | 'PERCENTAGE' | null;
+  discountValue?: number | null;
+  discountAmount: number;
+  taxableAmount: number;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+  totalTaxAmount: number;
+  totalAmount: number;
+  paymentStatus: 'PAID' | 'PARTIALLY_REFUNDED' | 'REFUNDED' | 'CANCELLED';
+  billStatus: 'COMPLETED' | 'PARTIALLY_RETURNED' | 'FULLY_RETURNED' | 'CANCELLED';
+  paymentMethod: 'CASH' | 'UPI' | 'CARD' | 'OTHER';
+  paymentReference?: string | null;
+  amountReceived?: number | null;
+  changeReturned?: number | null;
+  notes?: string | null;
+  cancelledAt?: string | null;
+  cancelledBy?: number | null;
+  cancelReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: SpotBillItem[];
+  payments?: SpotBillPayment[];
+  returns?: SpotBillReturn[];
+  cashier?: { id: number; name: string; staffCode?: string };
+  customer?: { id: number; userCode: string; name: string; email?: string; phone?: string };
+}
+

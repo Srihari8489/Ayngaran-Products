@@ -21,4 +21,12 @@ export class UpdateOrderStatusDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  courierName?: string;
+
+  @IsOptional()
+  @IsString()
+  trackingNumber?: string;
 }

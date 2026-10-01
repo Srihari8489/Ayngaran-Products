@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
+import { useCustomerOrderNotifications } from '../../context/CustomerOrderNotificationContext';
 import { CustomerOrderInvoiceModal } from '../../components/CustomerOrderInvoiceModal';
 import { resolveGstStateCode, getSupplyType } from '../../utils/gst.util';
 
@@ -94,6 +95,7 @@ const getStepIndex = (status: string) => {
 
 export const OrdersPage: React.FC = () => {
   const { isAuthenticated, openLoginModal, user } = useAuth();
+  const { subscribeToOrderStatus, isConnected } = useCustomerOrderNotifications();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -120,13 +122,45 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
+  // Real-time WebSocket Order Status Updates
+  useEffect(() => {
+    const unsubscribe = subscribeToOrderStatus((event) => {
+      // 1. Immediately update matching order in orders list in-place without page reload
+      setOrders((prevOrders) =>
+        prevOrders.map((ord) =>
+          ord.id === event.orderId ? { ...ord, orderStatus: event.newStatus } : ord,
+        ),
+      );
+
+      // 2. Immediately update open detail modal if this order is currently open
+      setSelectedDetailOrder((prev) => {
+        if (prev && prev.id === event.orderId) {
+          return { ...prev, orderStatus: event.newStatus };
+        }
+        return prev;
+      });
+
+      // 3. Immediately update open invoice modal if this order is currently open
+      setSelectedInvoiceOrder((prev) => {
+        if (prev && prev.id === event.orderId) {
+          return { ...prev, orderStatus: event.newStatus };
+        }
+        return prev;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [subscribeToOrderStatus]);
+
   useEffect(() => {
     if (!isAuthenticated) {
       openLoginModal();
       return;
     }
     refreshOrders(true);
-    // Poll every 30 seconds for live order status updates
+    // Poll every 30 seconds as background fallback
     pollIntervalRef.current = setInterval(() => refreshOrders(false), 30000);
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);

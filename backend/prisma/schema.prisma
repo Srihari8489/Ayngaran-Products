@@ -74,6 +74,8 @@ model Staff {
   role         Role                   @relation(fields: [roleId], references: [id])
   auditLogs    AuditLog[]
   transactions InventoryTransaction[]
+  spotBills    SpotBill[]
+  spotBillReturns SpotBillReturn[]
 
   @@map("staff")
 }
@@ -99,6 +101,7 @@ model User {
   orders    Order[]
   reviews   Review[]
   wishlistItems WishlistItem[]
+  spotBills     SpotBill[]
 
   @@map("users")
 }
@@ -280,6 +283,8 @@ model Product {
   orderItems            OrderItem[]
   inventoryTransactions InventoryTransaction[]
   wishlistItems         WishlistItem[]
+  spotBillItems         SpotBillItem[]
+  spotBillReturnItems   SpotBillReturnItem[]
 
   @@index([categoryId])
   @@index([brandId])
@@ -347,6 +352,8 @@ model ProductVariant {
   cartItems             CartItem[]
   orderItems            OrderItem[]
   inventoryTransactions InventoryTransaction[]
+  spotBillItems         SpotBillItem[]
+  spotBillReturnItems   SpotBillReturnItem[]
 
   @@index([productId])
   @@map("product_variants")
@@ -636,15 +643,20 @@ model AuditLog {
 // -------------------------------------------------------------
 
 model NotificationLog {
-  id        Int      @id @default(autoincrement())
-  recipient String
-  channel   String   // EMAIL, SMS
-  subject   String?
-  content   String   @db.Text
-  status    String   @default("SENT")
-  createdAt DateTime @default(now()) @map("created_at")
+  id           Int       @id @default(autoincrement())
+  type         String?   // ORDER_CREATED, OTP, etc.
+  recipient    String
+  channel      String    // EMAIL, SMS, WEBSOCKET
+  subject      String?
+  reference    String?   // Order ID or Order Number
+  content      String    @db.Text
+  status       String    @default("SENT") // PENDING, SENT, FAILED, EMITTED
+  errorMessage String?   @map("error_message") @db.Text
+  sentAt       DateTime? @map("sent_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   @@index([recipient])
+  @@index([reference])
   @@index([createdAt])
   @@map("notification_logs")
 }
@@ -745,4 +757,166 @@ model ShippingConfig {
 
   @@map("shipping_configs")
 }
+
+// -------------------------------------------------------------
+// SPOT BILLING / POS MODULE
+// -------------------------------------------------------------
+
+model SpotBill {
+  id                  Int               @id @default(autoincrement())
+  billNumber          String            @unique @map("bill_number")
+  invoiceNumber       String            @unique @map("invoice_number")
+  customerId          Int?              @map("customer_id")
+  cashierId           Int               @map("cashier_id")
+  cashierName         String            @map("cashier_name")
+  customerName        String            @default("Walk-in Customer") @map("customer_name")
+  customerPhone       String?           @map("customer_phone")
+  customerEmail       String?           @map("customer_email")
+  customerGstin       String?           @map("customer_gstin")
+  customerAddress     String?           @db.Text @map("customer_address")
+  customerState       String            @default("Tamil Nadu") @map("customer_state")
+  customerStateCode   String            @default("33") @map("customer_state_code")
+  supplyType          String            @default("INTRA_STATE") @map("supply_type")
+  subtotal            Decimal           @db.Decimal(10, 2)
+  discountType        String?           @map("discount_type")
+  discountValue       Decimal?          @db.Decimal(10, 2) @map("discount_value")
+  discountAmount      Decimal           @default(0.00) @db.Decimal(10, 2) @map("discount_amount")
+  taxableAmount       Decimal           @db.Decimal(10, 2) @map("taxable_amount")
+  cgstAmount          Decimal           @default(0.00) @db.Decimal(10, 2) @map("cgst_amount")
+  sgstAmount          Decimal           @default(0.00) @db.Decimal(10, 2) @map("sgst_amount")
+  igstAmount          Decimal           @default(0.00) @db.Decimal(10, 2) @map("igst_amount")
+  totalTaxAmount      Decimal           @db.Decimal(10, 2) @map("total_tax_amount")
+  totalAmount         Decimal           @db.Decimal(10, 2) @map("total_amount")
+  paymentStatus       String            @default("PAID") @map("payment_status")
+  billStatus          String            @default("COMPLETED") @map("bill_status")
+  paymentMethod       String            @map("payment_method")
+  paymentReference    String?           @map("payment_reference")
+  amountReceived      Decimal?          @db.Decimal(10, 2) @map("amount_received")
+  changeReturned      Decimal?          @db.Decimal(10, 2) @map("change_returned")
+  notes               String?           @db.Text
+  cancelledAt         DateTime?         @map("cancelled_at")
+  cancelledBy         Int?              @map("cancelled_by")
+  cancelReason        String?           @db.Text @map("cancel_reason")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  customer            User?             @relation(fields: [customerId], references: [id])
+  cashier             Staff             @relation(fields: [cashierId], references: [id])
+  items               SpotBillItem[]
+  payments            SpotBillPayment[]
+  returns             SpotBillReturn[]
+
+  @@index([billNumber])
+  @@index([invoiceNumber])
+  @@index([customerId])
+  @@index([cashierId])
+  @@index([paymentStatus])
+  @@index([billStatus])
+  @@index([paymentMethod])
+  @@index([createdAt])
+  @@map("spot_bills")
+}
+
+model SpotBillItem {
+  id                   Int                  @id @default(autoincrement())
+  spotBillId           Int                  @map("spot_bill_id")
+  productId            Int                  @map("product_id")
+  variantId            Int?                 @map("variant_id")
+  productNameSnapshot  String               @map("product_name_snapshot")
+  productCodeSnapshot  String               @map("product_code_snapshot")
+  brandSnapshot        String?              @map("brand_snapshot")
+  skuSnapshot          String               @map("sku_snapshot")
+  variantLabelSnapshot String?              @map("variant_label_snapshot")
+  imageUrlSnapshot     String?              @map("image_url_snapshot")
+  unitPrice            Decimal              @db.Decimal(10, 2) @map("unit_price")
+  quantity             Int
+  returnedQuantity     Int                  @default(0) @map("returned_quantity")
+  discountAmount       Decimal              @default(0.00) @db.Decimal(10, 2) @map("discount_amount")
+  taxableAmount        Decimal              @db.Decimal(10, 2) @map("taxable_amount")
+  gstRate              Decimal              @db.Decimal(5, 2) @map("gst_rate")
+  cgstRate             Decimal              @default(0.00) @db.Decimal(5, 2) @map("cgst_rate")
+  cgstAmount           Decimal              @default(0.00) @db.Decimal(10, 2) @map("cgst_amount")
+  sgstRate             Decimal              @default(0.00) @db.Decimal(5, 2) @map("sgst_rate")
+  sgstAmount           Decimal              @default(0.00) @db.Decimal(10, 2) @map("sgst_amount")
+  igstRate             Decimal              @default(0.00) @db.Decimal(5, 2) @map("igst_rate")
+  igstAmount           Decimal              @default(0.00) @db.Decimal(10, 2) @map("igst_amount")
+  totalTaxAmount       Decimal              @db.Decimal(10, 2) @map("total_tax_amount")
+  totalPrice           Decimal              @db.Decimal(10, 2) @map("total_price")
+  createdAt            DateTime             @default(now()) @map("created_at")
+
+  spotBill             SpotBill             @relation(fields: [spotBillId], references: [id], onDelete: Cascade)
+  product              Product              @relation(fields: [productId], references: [id])
+  variant              ProductVariant?      @relation(fields: [variantId], references: [id])
+  returnItems          SpotBillReturnItem[]
+
+  @@index([spotBillId])
+  @@index([productId])
+  @@index([variantId])
+  @@map("spot_bill_items")
+}
+
+model SpotBillPayment {
+  id              Int       @id @default(autoincrement())
+  spotBillId      Int       @map("spot_bill_id")
+  paymentMethod   String    @map("payment_method")
+  amount          Decimal   @db.Decimal(10, 2)
+  amountReceived  Decimal?  @db.Decimal(10, 2) @map("amount_received")
+  changeReturned  Decimal?  @db.Decimal(10, 2) @map("change_returned")
+  referenceNumber String?   @map("reference_number")
+  status          String    @default("COMPLETED")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  spotBill        SpotBill  @relation(fields: [spotBillId], references: [id], onDelete: Cascade)
+
+  @@index([spotBillId])
+  @@index([paymentMethod])
+  @@map("spot_bill_payments")
+}
+
+model SpotBillReturn {
+  id              Int                  @id @default(autoincrement())
+  returnNumber    String               @unique @map("return_number")
+  spotBillId      Int                  @map("spot_bill_id")
+  staffId         Int                  @map("staff_id")
+  staffName       String               @map("staff_name")
+  reason          String               @db.Text
+  refundAmount    Decimal              @db.Decimal(10, 2) @map("refund_amount")
+  refundMethod    String               @default("CASH") @map("refund_method")
+  refundReference String?              @map("refund_reference")
+  status          String               @default("COMPLETED")
+  createdAt       DateTime             @default(now()) @map("created_at")
+
+  spotBill        SpotBill             @relation(fields: [spotBillId], references: [id])
+  staff           Staff                @relation(fields: [staffId], references: [id])
+  items           SpotBillReturnItem[]
+
+  @@index([spotBillId])
+  @@index([returnNumber])
+  @@index([createdAt])
+  @@map("spot_bill_returns")
+}
+
+model SpotBillReturnItem {
+  id              Int            @id @default(autoincrement())
+  returnId        Int            @map("return_id")
+  spotBillItemId  Int            @map("spot_bill_item_id")
+  productId       Int            @map("product_id")
+  variantId       Int?           @map("variant_id")
+  quantity        Int
+  unitPrice       Decimal        @db.Decimal(10, 2) @map("unit_price")
+  refundAmount    Decimal        @db.Decimal(10, 2) @map("refund_amount")
+  taxRefundAmount Decimal        @default(0.00) @db.Decimal(10, 2) @map("tax_refund_amount")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  return          SpotBillReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  spotBillItem    SpotBillItem   @relation(fields: [spotBillItemId], references: [id])
+  product         Product        @relation(fields: [productId], references: [id])
+  variant         ProductVariant? @relation(fields: [variantId], references: [id])
+
+  @@index([returnId])
+  @@index([spotBillItemId])
+  @@map("spot_bill_return_items")
+}
+
 

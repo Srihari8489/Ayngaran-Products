@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -9,9 +10,16 @@ import { AssignDeliveryDto } from './dto/assign-delivery.dto';
 import { createPaginatedResponse } from '../common/utils/pagination.util';
 import { computeGstBreakdown } from '../common/utils/gst.util';
 
+import { NotificationsService } from '../notifications/notifications.service';
+
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) { }
 
   private computeShippingMetadata(order: any, mappedItems: any[], shippingAddress: any) {
     const baseWeight = 1000;
@@ -1170,41 +1178,96 @@ export class OrdersService {
   async updateOrderStatus(orderId: number, dto: UpdateOrderStatusDto, staffId?: number) {
     const existing = await this.prisma.client.order.findUnique({
       where: { id: orderId },
-      include: { user: true },
+      include: {
+        user: true,
+        deliveryAssignments: {
+          orderBy: { id: 'desc' },
+          take: 1,
+        },
+      },
     });
 
     if (!existing) throw new NotFoundException('Order not found');
 
+    const oldStatus = existing.orderStatus;
+    const newStatus = dto.status;
+    const isStatusChanged = oldStatus !== newStatus;
+
+    const courierName =
+      dto.courierName !== undefined
+        ? dto.courierName?.trim() || null
+        : existing.courierName || existing.deliveryAssignments?.[0]?.courierName || null;
+
+    const trackingNumber =
+      dto.trackingNumber !== undefined
+        ? dto.trackingNumber?.trim() || null
+        : existing.trackingNumber || existing.deliveryAssignments?.[0]?.trackingNumber || null;
+
     const updated = await this.prisma.client.order.update({
       where: { id: orderId },
       data: {
-        orderStatus: dto.status,
+        orderStatus: newStatus,
         notes: dto.notes ? `${existing.notes || ''}\n${dto.notes}` : existing.notes,
+        courierName,
+        trackingNumber,
       },
     });
 
-    // Write audit log
-    await this.prisma.raw.auditLog.create({
-      data: {
-        staffId: staffId || null,
-        action: 'CHANGE_ORDER_STATUS',
-        entityType: 'Order',
-        entityId: String(orderId),
-        oldValueJson: JSON.stringify({ status: existing.orderStatus }),
-        newValueJson: JSON.stringify({ status: dto.status }),
-      },
-    });
+    // If courierName or trackingNumber provided, ensure OrderDeliveryAssignment is synced
+    if (dto.courierName || dto.trackingNumber) {
+      const existingAssignment = existing.deliveryAssignments?.[0];
+      const deliveryStatus =
+        newStatus === 'DELIVERED'
+          ? 'DELIVERED'
+          : newStatus === 'OUT_FOR_DELIVERY'
+            ? 'OUT_FOR_DELIVERY'
+            : 'IN_TRANSIT';
 
-    // Notification
-    await this.prisma.raw.notificationLog.create({
-      data: {
-        recipient: existing.user.email || existing.user.phone || 'customer',
-        channel: existing.user.email ? 'EMAIL' : 'SMS',
-        subject: `Ayngaran Store: Order Status Updated #${existing.orderNumber}`,
-        content: `Your order #${existing.orderNumber} status has been updated to: ${dto.status}.`,
-        status: 'SENT',
-      },
-    });
+      if (existingAssignment) {
+        await this.prisma.client.orderDeliveryAssignment.update({
+          where: { id: existingAssignment.id },
+          data: {
+            courierName,
+            trackingNumber,
+            status: deliveryStatus,
+          } as any,
+        });
+      } else {
+        await this.prisma.client.orderDeliveryAssignment.create({
+          data: {
+            orderId,
+            courierName,
+            trackingNumber,
+            status: deliveryStatus,
+          } as any,
+        });
+      }
+    }
+
+    // Only dispatch notifications and audit log if status actually changed
+    if (isStatusChanged) {
+      // Write audit log
+      await this.prisma.raw.auditLog.create({
+        data: {
+          staffId: staffId || null,
+          action: 'CHANGE_ORDER_STATUS',
+          entityType: 'Order',
+          entityId: String(orderId),
+          oldValueJson: JSON.stringify({ status: oldStatus }),
+          newValueJson: JSON.stringify({ status: newStatus, courierName, trackingNumber }),
+        },
+      });
+
+      // Dispatch real-time WebSocket & Customer Email Notification
+      // NON-BLOCKING: Executed strictly after database update succeeds
+      this.notificationsService
+        .notifyOrderStatusUpdated(orderId, oldStatus, newStatus, dto.notes, courierName, trackingNumber)
+        .catch((err) => {
+          this.logger.error(
+            `Failed to dispatch order status notification for order ${orderId}: ${err.message}`,
+          );
+        });
+    }
 
     return updated;
   }

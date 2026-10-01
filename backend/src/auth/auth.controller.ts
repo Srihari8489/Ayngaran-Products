@@ -13,10 +13,14 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  Query,
+  NotFoundException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { RequestEmailOtpDto } from './dto/request-email-otp.dto';
+import { VerifyEmailOtpDto } from './dto/verify-email-otp.dto';
 import { StaffLoginDto } from './dto/staff-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -29,30 +33,55 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   // -------------------------------------------------------------
-  // CUSTOMER ENDPOINTS
+  // ACTIVE CUSTOMER EMAIL OTP ENDPOINTS
+  // -------------------------------------------------------------
+
+  @Post('email/request-otp')
+  @HttpCode(HttpStatus.OK)
+  async requestEmailOtp(@Body() dto: RequestEmailOtpDto) {
+    return this.authService.requestEmailOtp(dto.email);
+  }
+
+  @Post('email/verify-otp')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmailOtp(@Body() dto: VerifyEmailOtpDto) {
+    return this.authService.verifyEmailOtp(dto.email, dto.otp);
+  }
+
+  @Get('email/dev-otp')
+  async getEmailDevOtp(@Query('email') email: string) {
+    if (process.env.NODE_ENV === 'production' || process.env.EMAIL_PROVIDER !== 'development') {
+      throw new NotFoundException();
+    }
+    const devOtp = await this.authService.getEmailDevOtp(email);
+    return { devOtp };
+  }
+
+  // -------------------------------------------------------------
+  // CUSTOMER ENDPOINTS (PRESERVED WHATSAPP / BACKWARDS-COMPATIBLE)
   // -------------------------------------------------------------
 
   @Post('customer/send-otp')
   @HttpCode(HttpStatus.OK)
   async sendCustomerOtp(@Body() dto: RequestOtpDto) {
-    const target = dto.phone || dto.identifier || '';
-    if (!target) throw new BadRequestException('Phone number is required');
+    const target = dto.email || dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Email or phone number is required');
     return this.authService.requestCustomerOtp(target);
   }
 
   @Post('customer/request-otp')
   @HttpCode(HttpStatus.OK)
   async requestCustomerOtp(@Body() dto: RequestOtpDto) {
-    const target = dto.phone || dto.identifier || '';
-    if (!target) throw new BadRequestException('Phone number is required');
+    const target = dto.email || dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Email or phone number is required');
     return this.authService.requestCustomerOtp(target);
   }
 
   @Post('customer/verify-otp')
   @HttpCode(HttpStatus.OK)
   async verifyCustomerOtp(@Body() dto: VerifyOtpDto) {
-    const target = dto.phone || dto.identifier || '';
-    if (!target) throw new BadRequestException('Phone number is required');
+    const target = dto.email || dto.phone || dto.identifier || '';
+    if (!target) throw new BadRequestException('Email or phone number is required');
     return this.authService.verifyCustomerOtp(target, dto.otp, dto.name);
   }
 

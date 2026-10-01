@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   FolderTree,
@@ -8,6 +8,7 @@ import {
   Boxes,
   Layers,
   ShoppingBag,
+  Receipt,
   Truck,
   CreditCard,
   MessageSquare,
@@ -29,10 +30,12 @@ import {
   Settings,
 } from 'lucide-react';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { OrderNotificationBell } from './OrderNotificationBell';
 
 export const AdminLayout: React.FC = () => {
   const { staff, logout, hasPermission } = useAdminAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleLogout = () => {
@@ -59,6 +62,19 @@ export const AdminLayout: React.FC = () => {
     {
       label: 'Orders & Stock',
       items: [
+        {
+          name: 'Spot Billing',
+          path: '/spot-billing',
+          icon: Receipt,
+          permission: 'SPOT_BILLING_VIEW',
+          children: [
+            { name: 'New Bill', path: '/spot-billing?tab=new-bill', queryTab: 'new-bill' },
+            { name: 'Billing History', path: '/spot-billing?tab=history', queryTab: 'history' },
+            { name: 'Invoices', path: '/spot-billing?tab=invoices', queryTab: 'invoices' },
+            { name: 'Returns', path: '/spot-billing?tab=returns', queryTab: 'returns' },
+            { name: 'Reports', path: '/spot-billing?tab=reports', queryTab: 'reports' },
+          ],
+        },
         { name: 'Customer Orders', path: '/orders', icon: ShoppingBag, permission: 'ORDERS_MANAGE' },
         { name: 'Customers', path: '/users', icon: UserCheck, permission: null },
         { name: 'Stock & Inventory', path: '/inventory', icon: Layers, permission: 'INVENTORY_MANAGE' },
@@ -212,39 +228,82 @@ export const AdminLayout: React.FC = () => {
                 >
                   {group.label}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                  {filteredItems.map((item) => {
+                  {filteredItems.map((item: any) => {
                     const Icon = item.icon;
+                    const isParentActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+                    const currentTabParam = new URLSearchParams(location.search).get('tab') || 'new-bill';
+
                     return (
-                      <NavLink
-                        key={item.path}
-                        to={item.path}
-                        end={item.path === '/'}
-                        onClick={() => setIsSidebarOpen(false)}
-                        style={({ isActive }) => ({
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.7rem',
-                          padding: '0.55rem 0.75rem',
-                          borderRadius: '0.6rem',
-                          fontSize: '0.85rem',
-                          fontWeight: isActive ? 800 : 600,
-                          color: '#ffffff',
-                          backgroundColor: isActive ? 'rgba(255, 255, 255, 0.18)' : 'transparent',
-                          border: isActive
-                            ? '1px solid rgba(255, 255, 255, 0.35)'
-                            : '1px solid transparent',
-                          textDecoration: 'none',
-                          transition: 'all 0.15s ease',
-                          boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
-                        })}
-                      >
-                        <Icon size={16} style={{ color: '#ffffff', opacity: 1, flexShrink: 0 }} />
-                        <span style={{ color: '#ffffff' }}>{item.name}</span>
-                      </NavLink>
+                      <div key={item.path} style={{ display: 'flex', flexDirection: 'column' }}>
+                        <NavLink
+                          to={item.path}
+                          end={item.path === '/'}
+                          onClick={() => setIsSidebarOpen(false)}
+                          style={({ isActive }) => ({
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.7rem',
+                            padding: '0.55rem 0.75rem',
+                            borderRadius: '0.6rem',
+                            fontSize: '0.85rem',
+                            fontWeight: (isActive || isParentActive) ? 800 : 600,
+                            color: '#ffffff',
+                            backgroundColor: (isActive || isParentActive) ? 'rgba(255, 255, 255, 0.18)' : 'transparent',
+                            border: (isActive || isParentActive)
+                              ? '1px solid rgba(255, 255, 255, 0.35)'
+                              : '1px solid transparent',
+                            textDecoration: 'none',
+                            transition: 'all 0.15s ease',
+                            boxShadow: (isActive || isParentActive) ? '0 2px 8px rgba(0,0,0,0.12)' : 'none',
+                          })}
+                        >
+                          <Icon size={16} style={{ color: '#ffffff', opacity: 1, flexShrink: 0 }} />
+                          <span style={{ color: '#ffffff' }}>{item.name}</span>
+                        </NavLink>
+
+                        {/* Indented Sub-items */}
+                        {item.children && isParentActive && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.12rem',
+                              paddingLeft: '1.25rem',
+                              marginTop: '0.2rem',
+                              marginBottom: '0.35rem',
+                              borderLeft: '2px solid rgba(255, 255, 255, 0.2)',
+                              marginLeft: '1.25rem',
+                            }}
+                          >
+                            {item.children.map((sub: any) => {
+                              const isSubActive = currentTabParam === sub.queryTab;
+                              return (
+                                <NavLink
+                                  key={sub.path}
+                                  to={sub.path}
+                                  onClick={() => setIsSidebarOpen(false)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    padding: '0.35rem 0.6rem',
+                                    borderRadius: '0.4rem',
+                                    fontSize: '0.78rem',
+                                    fontWeight: isSubActive ? 800 : 600,
+                                    color: isSubActive ? '#ffffff' : 'rgba(255, 255, 255, 0.75)',
+                                    backgroundColor: isSubActive ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                                    textDecoration: 'none',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                >
+                                  <span>{sub.name}</span>
+                                </NavLink>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
-                </div>
               </div>
             );
           })}
@@ -440,6 +499,7 @@ export const AdminLayout: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <OrderNotificationBell />
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.72rem', fontWeight: 700, padding: '0.3rem 0.75rem', borderRadius: '999px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }}>
               <ShieldCheck size={13} /> {typeof staff?.role === 'string' ? staff.role : staff?.role?.name || (staff?.role as any)?.code?.replace(/_/g, ' ') || 'Store Admin'}
             </span>

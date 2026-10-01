@@ -22,14 +22,16 @@ import { ProfilePage } from './pages/account/ProfilePage';
 import { AddressesPage } from './pages/account/AddressesPage';
 import { OrdersPage as AccountOrdersPage } from './pages/account/OrdersPage';
 
+import { CustomerOrderNotificationProvider } from './context/CustomerOrderNotificationContext';
 import { ScrollToTop } from './components/ScrollToTop';
 
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <CartProvider>
-        <WishlistProvider>
-          <Router>
+      <CustomerOrderNotificationProvider>
+        <CartProvider>
+          <WishlistProvider>
+            <Router>
             <ScrollToTop />
             <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100 font-sans selection:bg-amber-500 selection:text-black">
               {/* Top Navigation */}
@@ -82,7 +84,8 @@ export const App: React.FC = () => {
           </Router>
         </WishlistProvider>
       </CartProvider>
-    </AuthProvider>
+    </CustomerOrderNotificationProvider>
+  </AuthProvider>
   );
 };
 

@@ -9,6 +9,10 @@ export class VerifyOtpDto {
   @IsString()
   identifier?: string;
 
+  @IsOptional()
+  @IsString()
+  email?: string;
+
   @IsNotEmpty()
   @IsString()
   @Length(6, 6)

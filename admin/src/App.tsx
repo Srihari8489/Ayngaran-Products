@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AdminAuthProvider, useAdminAuth } from './context/AdminAuthContext';
+import { OrderNotificationProvider } from './context/OrderNotificationContext';
 import { AdminLayout } from './components/AdminLayout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -21,6 +22,7 @@ import { InquiriesPage } from './pages/InquiriesPage';
 import { SubscribersPage } from './pages/SubscribersPage';
 import { UsersPage } from './pages/UsersPage';
 import { ShippingSettingsPage } from './pages/ShippingSettingsPage';
+import { SpotBillingPage } from './pages/SpotBillingPage';
 
 // Protected Route Guard
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -44,44 +46,47 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 export const App: React.FC = () => {
   return (
     <AdminAuthProvider>
-      <Router>
-        <Routes>
-          {/* Public Login Route */}
-          <Route path="/login" element={<LoginPage />} />
+      <OrderNotificationProvider>
+        <Router>
+          <Routes>
+            {/* Public Login Route */}
+            <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected Administrative Operations Suite */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <AdminLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<DashboardPage />} />
-            <Route path="categories" element={<CategoriesPage />} />
-            <Route path="attributes" element={<AttributesPage />} />
-            <Route path="brands" element={<BrandsPage />} />
-            <Route path="products" element={<ProductsPage />} />
-            <Route path="inventory" element={<InventoryPage />} />
-            <Route path="orders" element={<OrdersPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="inquiries" element={<InquiriesPage />} />
-            <Route path="feedbacks" element={<FeedbacksPage />} />
-            <Route path="subscribers" element={<SubscribersPage />} />
-            <Route path="shipping-settings" element={<ShippingSettingsPage />} />
-            <Route path="delivery-partners" element={<DeliveryPartnersPage />} />
-            <Route path="gateways" element={<GatewaysPage />} />
-            <Route path="reviews" element={<ReviewsPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="staff" element={<StaffPage />} />
-            <Route path="audit-logs" element={<AuditLogsPage />} />
-          </Route>
+            {/* Protected Administrative Operations Suite */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <AdminLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<DashboardPage />} />
+              <Route path="categories" element={<CategoriesPage />} />
+              <Route path="attributes" element={<AttributesPage />} />
+              <Route path="brands" element={<BrandsPage />} />
+              <Route path="products" element={<ProductsPage />} />
+              <Route path="inventory" element={<InventoryPage />} />
+              <Route path="spot-billing" element={<SpotBillingPage />} />
+              <Route path="orders" element={<OrdersPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="inquiries" element={<InquiriesPage />} />
+              <Route path="feedbacks" element={<FeedbacksPage />} />
+              <Route path="subscribers" element={<SubscribersPage />} />
+              <Route path="shipping-settings" element={<ShippingSettingsPage />} />
+              <Route path="delivery-partners" element={<DeliveryPartnersPage />} />
+              <Route path="gateways" element={<GatewaysPage />} />
+              <Route path="reviews" element={<ReviewsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
+              <Route path="staff" element={<StaffPage />} />
+              <Route path="audit-logs" element={<AuditLogsPage />} />
+            </Route>
 
-          {/* Catch-all fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
+            {/* Catch-all fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+      </OrderNotificationProvider>
     </AdminAuthProvider>
   );
 };

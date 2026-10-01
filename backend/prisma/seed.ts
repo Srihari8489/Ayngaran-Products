@@ -427,7 +427,7 @@ async function main() {
   // 3. Seed Super Admin Staff
   console.log('  -> Seeding Staff Accounts...');
   const salt = await bcrypt.genSalt(10);
-  const passwordHash = await bcrypt.hash('Admin@123AYNGARAN', salt);
+  const passwordHash = await bcrypt.hash('Admin@2026', salt);
 
   const superAdminStaff = await prisma.staff.upsert({
     where: { email: 'admin@ayngaran.com' },
@@ -724,7 +724,7 @@ async function main() {
   }
 
   console.log('✨ Ayngaran Foods Official Database Seeded Successfully!');
-  console.log('   Admin credentials: admin@ayngaran.com / Admin@123AYNGARAN');
+  console.log('   Admin credentials: admin@ayngaran.com / Admin@2026');
 }
 
 main()

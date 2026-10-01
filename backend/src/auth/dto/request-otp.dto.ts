@@ -11,5 +11,9 @@ export class RequestOtpDto {
 
   @IsOptional()
   @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
   name?: string;
 }
